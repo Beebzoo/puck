@@ -108,12 +108,14 @@ function sweater(G){
     await stitch(it, !p);
     if(!G.live) return;
     $("#ww-plate").textContent = it.name;
+    /* his photo goes up in the stall, next to the stitched name */
+    $(".ww-st .back").insertAdjacentHTML("beforeend", '<span class="pin">' + K.face(it.name, { team: it.team, size: 64, ghost: !p }) + "</span>");
     if(p){
       const r = $(".ww-st .back").getBoundingClientRect();
       K.confetti([T.c1, T.c2, "#ffffff"], { n: 70, x: r.left + r.width/2, y: r.top + r.height*.45 });
       if(p.run === 3 && !K.RM()) K.hats({ name: p.name });
     }
-    $("#ww-after").innerHTML = '<div class="card ww-fact"><p class="one">' + K.esc(it.fact) + '</p><span class="label">' + K.esc(it.name) + " · " + K.esc(T.name) + " · " + K.esc(it.years) + "</span></div>";
+    $("#ww-after").innerHTML = '<div class="card ww-fact has-f">' + K.face(it.name, { team: it.team, size: 48, delay: K.RM() ? 0 : 200 }) + '<p class="one">' + K.esc(it.fact) + '</p><span class="label">' + K.esc(it.name) + " · " + K.esc(T.name) + " · " + K.esc(it.years) + "</span></div>";
     const won = G.players.find(q => q.score >= G.opt.to);
     const over = solo ? G.i + 1 >= G.total : !!won;
     $("#ww-after").insertAdjacentHTML("beforeend", '<button type="button" class="pill wide" id="ww-next">' + (over ? "Full time" : "Next sweater") + "</button>");

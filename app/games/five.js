@@ -93,8 +93,11 @@ async function reveal(G, k, by, ghost){
   const K = P.kit, $ = P.ui.$, pr = G.pr, a = pr.answers[k];
   const slot = $('.s5-slot[data-k="' + k + '"]'), mark = $('.s5-mark[data-k="' + k + '"]'), sh = $('.s5-shadow[data-k="' + k + '"]');
   if(!slot) return;
-  slot.innerHTML = sweater(pr, a, ghost) + '<div class="s5-tag' + (ghost ? " ghost" : "") + '"' + (by ? ' style="--pc:' + by.col.c + '"' : "") + "><b>" + K.esc(pr.kind === "team" ? P.team(a.team).name.split(" ").pop() : surname(a.name)) + "</b>" +
-    (valueLine(pr, a) ? "<small>" + K.esc(valueLine(pr, a)) + "</small>" : "") + "</div>";
+  const isP = pr.kind !== "team";
+  slot.innerHTML = sweater(pr, a, ghost) + '<div class="s5-tag' + (ghost ? " ghost" : "") + (isP ? " has-f" : "") + '"' + (by ? ' style="--pc:' + by.col.c + '"' : "") + ">" +
+    (isP ? K.face(a.name, { team: a.team, size: 22, ghost, delay: K.RM() || ghost ? 0 : 1000 }) + "<span>" : "") +
+    "<b>" + K.esc(isP ? surname(a.name) : P.team(a.team).name.split(" ").pop()) + "</b>" +
+    (valueLine(pr, a) ? "<small>" + K.esc(valueLine(pr, a)) + "</small>" : "") + (isP ? "</span>" : "") + "</div>";
   slot.classList.add("on"); mark.classList.add("got"); mark.style.setProperty("--pc", by ? by.col.c : "#6b7c8d"); sh.classList.add("on");
   const card = slot.firstChild, tag = slot.children[1];
   if(K.RM()) return;
@@ -123,7 +126,7 @@ function caption(G, k, by){
   const K = P.kit, cap = P.ui.$("#s5-cap"), pr = G.pr, a = pr.answers[k];
   if(!cap) return;
   const T = P.team(a.team);
-  cap.innerHTML = '<div class="in" style="--tc:' + T.c1 + ";--tc2:" + T.c2 + '"><span class="rk">' + (k + 1) + '</span><img src="' + P.logo(a.team, true) + '" alt="">' +
+  cap.innerHTML = '<div class="in" style="--tc:' + T.c1 + ";--tc2:" + T.c2 + '"><span class="rk">' + (k + 1) + "</span>" + (pr.kind === "team" ? '<img src="' + P.logo(a.team, true) + '" alt="">' : K.face(a.name, { team: a.team, size: 42, delay: K.RM() ? 0 : 120 })) +
     "<div><b>" + K.esc(pr.kind === "team" ? T.name : a.name) + " " + flagOf(a.cc) + "</b><small>" + K.esc(valueLong(pr, a)) + (by && G.players.length > 1 ? " · " + K.esc(by.name) : "") + "</small></div></div>";
   clearTimeout(G.capT);
   cap.classList.remove("on"); void cap.offsetWidth; cap.classList.add("on");
@@ -256,7 +259,10 @@ function round(G){
     if(!G.live) return;
     const got = G.found.filter(x => x >= 0).length, last = G.r === G.prompts.length - 1;
     const per = !solo ? '<div class="s5-per">' + G.players.map((p, i) => '<span style="--pc:' + p.col.c + '"><i></i>' + K.esc(p.name) + " <b>+" + G.found.filter(x => x === i).length + "</b></span>").join("") + "</div>" : "";
-    $("#s5-after").innerHTML = '<div class="card s5-end"><h2>' + (got === 5 ? "All five!" : got + " of 5") + "</h2>" + per +
+    /* the round recap: the five faces, the ones nobody named in grey */
+    const five = pr.kind !== "team" ? '<div class="s5-five">' + pr.answers.map((a, k) => '<figure class="' + (G.found[k] < 0 ? "miss" : "") + '">' +
+      K.face(a.name, { team: a.team, size: 52, ghost: G.found[k] < 0, delay: K.RM() ? 0 : 150 + k*90 }) + "<figcaption>" + K.esc(surname(a.name)) + "</figcaption></figure>").join("") + "</div>" : "";
+    $("#s5-after").innerHTML = '<div class="card s5-end"><h2>' + (got === 5 ? "All five!" : got + " of 5") + "</h2>" + five + per +
       '<button type="button" class="pill wide" id="s5-next">' + (last ? "Full time" : "Next round") + "</button></div>";
     const end = $("#s5-after .s5-end");
     if(!K.RM()) end.animate([{ opacity: 0, transform: "translateY(16px)" }, { opacity: 1, transform: "none" }], { duration: 380, easing: "ease-out", fill: "both" });

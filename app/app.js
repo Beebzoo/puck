@@ -75,14 +75,16 @@ const norm = s => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase
 async function listPlay(id){
   const L = P.LISTS.find(l => l.id === id);
   if(!L){ location.hash = "#lists"; return; }
-  const got = new Set(); let wrong = 0, gaveUp = false; const t0 = Date.now();
+  const got = new Set(); let wrong = 0, gaveUp = false, fresh = -1; const t0 = Date.now();
   const show = it => it.kind === "team" || L.kind === "team" ? P.team(it.team).name : L.kind === "year" ? String(it.year) : it.name;
   app.innerHTML = band(L.title, L.sub, "#lists") + '<div class="wrap"><div style="display:flex;justify-content:space-between;align-items:center;margin:4px 2px 10px"><span class="label" id="cnt"></span><button type="button" class="ghost" id="give">Give up</button></div>' +
     '<div class="slots" id="slots"></div><form class="guess" id="gf" autocomplete="off"><input id="gi" placeholder="Type an answer" aria-label="Your answer" enterkeyhint="go"><button class="pill" type="submit" style="padding:12px 18px">Go</button></form><div id="end"></div></div>';
   const paint = () => {
     $("#slots").innerHTML = L.items.map((it, i) => {
       const ok = got.has(i), miss = gaveUp && !ok;
-      const pic = (ok || miss) ? (it.team ? logoImg(it.team, 40) : it.cc ? '<img class="flag" src="' + P.flag(it.cc) + '" alt="" style="width:34px;height:23px">' : "") : '<span class="ph"></span>';
+      /* a name list shows his face (app/games/faces.js) with the flag on it; teams their logo */
+      const pic = (ok || miss) ? (it.team ? logoImg(it.team, 40) : L.kind === "name" && P.kit && P.kit.face ? P.kit.face(it.name, { size: 40, flag: it.cc, ghost: miss, pop: ok && i === fresh }) :
+        it.cc ? '<img class="flag" src="' + P.flag(it.cc) + '" alt="" style="width:34px;height:23px">' : "") : '<span class="ph"></span>';
       return '<div class="slot' + (ok ? " got" : miss ? " missed" : "") + '"><span class="lab">' + esc(it.label || i + 1) + "</span>" + (pic || '<span class="ph"></span>') + "<b>" + (ok || miss ? esc(show(it)) : "") + "</b></div>";
     }).join("");
     $("#cnt").textContent = got.size + " of " + L.items.length + (wrong ? " · " + wrong + " wrong" : "");
@@ -109,8 +111,8 @@ async function listPlay(id){
       else names = [it.name, ...(it.alias || [])];
       if(names.map(norm).includes(v)) hit.push(i);
     });
-    if(hit.length){ hit.forEach(i => got.add(i)); input.value = ""; paint(); if(got.size === L.items.length) end(); }
-    else { wrong++; input.classList.remove("shake"); void input.offsetWidth; input.classList.add("shake"); paint(); input.select(); }
+    if(hit.length){ hit.forEach(i => got.add(i)); fresh = hit[0]; input.value = ""; paint(); fresh = -1; if(got.size === L.items.length) end(); }
+    else { fresh = -1; wrong++; input.classList.remove("shake"); void input.offsetWidth; input.classList.add("shake"); paint(); input.select(); }
   });
   $("#give").addEventListener("click", () => { gaveUp = true; paint(); end(); });
 }

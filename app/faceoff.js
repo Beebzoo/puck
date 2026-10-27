@@ -790,6 +790,7 @@ function final(tok){
   RM().unselect();
   call('');
   const w = M.score[0] > M.score[1] ? 0 : 1, W = M.p[w], L = M.p[1 - w];
+  if(RM().goalieWin) RM().goalieWin(W.team);
   const scorers = side => M.goals.filter(g => g.w === side && !g.so).map(g => esc(g.name) + (g.period && M.qpp ? ' <small>' + PERIOD_SAYS[g.period - 1] + '</small>' : '')).join(', ') || '–';
   const st = M.st;
   const row = (lab, k) => '<tr><td>' + st[0][k] + '</td><th>' + lab + '</th><td>' + st[1][k] + '</td></tr>';

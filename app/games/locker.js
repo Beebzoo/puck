@@ -37,7 +37,8 @@ function nextFor(G){
 }
 function stallFor(c, known, stat){
   const K = P.kit;
-  return K.stall({ team: c.team, plate: K.esc(surname(c.name)), cls: "lr-st", body: '<div class="ww-hang">' + K.jersey(c.team, { hanger: true, name: surname(c.name), number: c.number }) + "</div>" +
+  return K.stall({ team: c.team, plate: K.esc(surname(c.name)), cls: "lr-st", body: '<span class="pin">' + K.face(c.name, { team: c.team, size: 46, pop: !K.RM() && !known }) + "</span>" +
+    '<div class="ww-hang">' + K.jersey(c.team, { hanger: true, name: surname(c.name), number: c.number }) + "</div>" +
     '<div class="lr-num' + (known ? "" : " q") + '"><b data-v="0">' + (known ? fmt(c[stat[0]]) : "?") + "</b><small>" + stat[2] + "</small></div>" });
 }
 function screen(G){

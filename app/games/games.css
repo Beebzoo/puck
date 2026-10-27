@@ -364,3 +364,53 @@ body:has(.gx-play) .tabbar{display:none}
 .lr-say{min-height:42px;margin:10px 2px 0;font:italic 15px/1.35 var(--body);color:var(--muted)}
 .lr-say b{font:900 17px/1 var(--display);font-style:normal;text-transform:uppercase;letter-spacing:.03em}
 .lr-say.good b{color:var(--good)}.lr-say.bad b{color:var(--bad)}
+
+/* =================== faces: NHL headshots (PUCK.kit.face) ===================
+   A fixed-size badge: team-colour ring, a dark steel edge, the mug cropped to
+   the face over a lit team-colour backdrop (newer mugs are cut out), a gloss.
+   .nf = no photo: the initials show. .pop = a short spring in. */
+.gx-face{--fs:56px;position:relative;display:inline-block;flex:none;width:var(--fs);height:var(--fs);vertical-align:middle;line-height:0;
+  filter:drop-shadow(0 4px 8px rgba(0,0,0,.5))}
+.gx-face .rim{position:absolute;inset:0;border-radius:50%;padding:max(2px,calc(var(--fs)*.055));
+  background:conic-gradient(from 200deg,var(--tc),color-mix(in srgb,var(--tc2) 85%,#fff) 25%,var(--tc) 50%,var(--tc2) 75%,var(--tc));
+  box-shadow:0 0 0 1px rgba(232,243,255,.7),inset 0 0 0 1px rgba(0,0,0,.35)}
+.gx-face .in{position:relative;display:block;width:100%;height:100%;border-radius:50%;overflow:hidden;
+  background:radial-gradient(75% 70% at 50% 28%,color-mix(in srgb,var(--tc) 45%,#dfe9f4),color-mix(in srgb,var(--tc) 80%,#0a1c38) 70%,#061226);
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.45)}
+.gx-face .in img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scale(1.42);transform-origin:50% 36%;display:block}
+.gx-face .ini{position:absolute;inset:0;display:grid;place-items:center;font:900 italic calc(var(--fs)*.38)/1 var(--game,var(--display));color:#fff;letter-spacing:.02em;
+  text-shadow:0 2px 0 rgba(0,0,0,.35),0 0 10px rgba(0,0,0,.25);font-style:italic}
+.gx-face .gl{position:absolute;inset:0;border-radius:50%;pointer-events:none;
+  background:linear-gradient(150deg,rgba(255,255,255,.38),rgba(255,255,255,.06) 32%,transparent 46%),radial-gradient(120% 60% at 50% 120%,rgba(0,0,0,.35),transparent 60%);
+  box-shadow:inset 0 1px 1px rgba(255,255,255,.4)}
+.gx-face .gl::after{content:"";position:absolute;inset:0;border-radius:inherit;background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.55) 50%,transparent 65%);transform:translateX(-120%);opacity:0}
+.gx-face .fl{position:absolute;right:-2px;bottom:-1px;width:calc(var(--fs)*.4);height:auto;aspect-ratio:3/2;object-fit:cover;border-radius:2px;box-shadow:0 0 0 1.5px #061226,0 2px 4px rgba(0,0,0,.5)}
+.gx-face.shield .rim,.gx-face.shield .in,.gx-face.shield .gl{border-radius:0;clip-path:polygon(50% 0,100% 13%,100% 58%,50% 100%,0 58%,0 13%)}
+.gx-face:not(.nf) .ini{visibility:hidden}
+.gx-face.ghost .in{filter:grayscale(.85) contrast(.9) brightness(1.05)}
+.gx-face.ghost .rim{background:linear-gradient(#6b7c8d,#3a4a5e)}
+.gx-face.pop{animation:gxFacePop .6s cubic-bezier(.2,1.5,.4,1) var(--fd,0s) both}
+.gx-face.pop .gl::after{animation:gxFaceShine .8s ease-in-out calc(var(--fd,0s) + .35s) both}
+@keyframes gxFacePop{from{transform:scale(.2) rotate(-12deg);opacity:0}60%{opacity:1}}
+@keyframes gxFaceShine{0%{transform:translateX(-120%);opacity:1}100%{transform:translateX(120%);opacity:1}}
+@media (prefers-reduced-motion:reduce){.gx-face.pop,.gx-face.pop .gl::after{animation:none}}
+
+/* Starting Five: a small face on the name tag, a big one in the lower third, the five in the round recap */
+.s5-tag.has-f{display:flex;align-items:center;gap:4px;padding:2px 6px 2px 2px;text-align:left}
+.s5-tag.has-f .gx-face{filter:none}
+.s5-cap .gx-face{margin:-2px 0}
+.s5-five{display:flex;justify-content:center;gap:8px;width:100%;flex-wrap:wrap}
+.s5-five figure{margin:0;display:grid;justify-items:center;gap:5px;width:58px;min-width:0}
+.s5-five figcaption{font:800 italic 11px/1.1 var(--game,var(--display));text-transform:uppercase;letter-spacing:.02em;color:var(--chrome,#fff);max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.s5-five figure.miss figcaption{color:#8ea7c2}
+
+/* Who Wore It? and The Locker Room: the photo pinned up in the stall */
+.gx-stall .pin{position:absolute;top:8px;right:8px;z-index:3;transform:rotate(4deg)}
+.gx-stall .pin::before{content:"";position:absolute;left:50%;top:-3px;width:9px;height:9px;margin-left:-4.5px;border-radius:50%;z-index:2;background:radial-gradient(circle at 35% 35%,#ff8a8f,#c8202a 60%,#6e0b10);box-shadow:0 2px 2px rgba(0,0,0,.5)}
+.lr-st .pin{top:6px;right:6px}
+.ww-fact.has-f{grid-template-columns:auto minmax(0,1fr);align-items:center;column-gap:12px}
+.ww-fact.has-f > .gx-face{grid-row:span 2}
+
+/* Draft Day: the pick's face on the big screen and in the card */
+.dd-stage .scr-in .gx-face{flex:none}
+.dd-info .row .gx-face{flex:none}

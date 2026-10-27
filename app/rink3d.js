@@ -531,20 +531,10 @@ function paintSocks(g, k){
   g.fillStyle = sp[0]; g.fillRect(0, 0, 64, 128);
   let f = .3; for(const [c, h] of sp.slice(1)){ g.fillStyle = c; g.fillRect(0, 128 - (f + h)*128, 64, h*128 + .5); f += h; }
 }
-function paintPad(g, c1, c2){
-  g.fillStyle = '#f4f6f8'; g.fillRect(0, 0, 64, 192); g.strokeStyle = c1; g.lineWidth = 3; g.strokeRect(2, 2, 60, 188);
-  g.lineWidth = 2; for(const x of [22, 42]){ g.beginPath(); g.moveTo(x, 60); g.lineTo(x, 186); g.stroke(); }
-  g.fillStyle = c1; g.fillRect(2, 44, 60, 16); g.fillStyle = c2; g.fillRect(2, 60, 60, 5); g.fillStyle = c1; for(const y of [100, 140]) g.fillRect(4, y, 56, 4);
-  g.beginPath(); g.moveTo(2, 186); g.lineTo(62, 150); g.lineTo(62, 186); g.closePath(); g.fill();
-}
-function paintMask(g, abbr, c1, c2){
-  g.fillStyle = c1; g.fillRect(0, 0, 512, 256);
-  g.fillStyle = c2; g.beginPath(); g.moveTo(0, 60); g.bezierCurveTo(160, 20, 340, 140, 512, 80); g.lineTo(512, 118); g.bezierCurveTo(340, 180, 160, 64, 0, 104); g.fill();
-  g.fillStyle = '#ffffff'; g.fillRect(0, 150, 512, 8);
-  const img = logo(abbr, lum(c1) > .55 ? 'light' : 'dark');
-  if(img) for(const u of [.07, .43]) drawCrest(g, img, u*512, 110, 90, null, 1);
-}
-function paintBlocker(g, c1, c2){ g.fillStyle = '#f4f6f8'; g.fillRect(0, 0, 64, 112); g.strokeStyle = c1; g.lineWidth = 7; g.strokeRect(3, 3, 58, 106); g.fillStyle = c2; g.fillRect(8, 48, 48, 9); g.fillStyle = c1; g.fillRect(8, 60, 48, 6); }
+/* the goalie's pads, mask and blocker are painted in app/faceoff/goalie3d.js (his atlas): teamMats still asks for these */
+function paintPad(g, c1){ g.fillStyle = '#f4f6f8'; g.fillRect(0, 0, 64, 192); g.fillStyle = c1; g.fillRect(0, 44, 64, 16); }
+function paintMask(g, abbr, c1){ g.fillStyle = c1; g.fillRect(0, 0, 512, 256); }
+function paintBlocker(g, c1){ g.fillStyle = '#f4f6f8'; g.fillRect(0, 0, 64, 112); g.strokeStyle = c1; g.lineWidth = 7; g.strokeRect(3, 3, 58, 106); }
 
 /* every painted canvas, so it can be painted again once the fonts and logos have landed */
 const painted = [];
@@ -592,173 +582,23 @@ function manMats(abbr, name, num){
 const SKINS = [0xf1cfae, 0xe0b48c, 0xc99067, 0xa86e48, 0x7d4e30];
 const skinMats = SKINS.map(c => { const m = std(c, .6); m.emissive.setHex(c); m.emissiveIntensity = .18; return m; });
 
-/* ===================================== THE SKATER ===================================== */
-function makeSkater(){
-  const S = { root: new THREE.Group(), hand: 'L' };
-  world.add(S.root);
-  const tm = teamMats('MTL'), mm = manMats('MTL', '', '');
-  const pelvisG = new THREE.Group(); S.root.add(pelvisG);
-  const pants = mesh(new THREE.CylinderGeometry(.2, .232, .32, 18), tm.pants, pelvisG, 0, -.1, 0); pants.scale.z = .7;
-  const torso = new THREE.Group(); S.root.add(torso);
-  const sweater = mesh(TORSO_GEO, mm.torso, torso); sweater.scale.z = .7;
-  const collar = mesh(new THREE.TorusGeometry(.083, .02, 8, 22), tm.collar, torso, 0, .645, -.004); collar.rotation.x = Math.PI/2; collar.scale.y = .8;
-  const neck = mesh(new THREE.CylinderGeometry(.058, .064, .1, 12), skinMats[1], torso, 0, .66, -.01);
-  const head = new THREE.Group(); head.position.set(0, .66, -.03); torso.add(head);
-  const face = mesh(new THREE.SphereGeometry(.1, 16, 12), skinMats[1], head, 0, .09, -.03); face.scale.set(.88, 1.05, .95);
-  const helm = mesh(new THREE.SphereGeometry(.125, 22, 16, 0, Math.PI*2, 0, Math.PI*.62), tm.helm, head, 0, .1, -.01); helm.scale.set(.96, .96, 1.12);
-  const helmBits = [mesh(new THREE.BoxGeometry(.2, .05, .03), tm.helm, head, 0, .045, .1)];
-  for(const s of [-1, 1]) helmBits.push(mesh(new THREE.BoxGeometry(.03, .08, .07), tm.helm, head, s*.115, .06, 0));
-  mesh(new THREE.CylinderGeometry(.128, .128, .065, 18, 1, true, Math.PI - .95, 1.9), Mt.visor, head, 0, .07, -.03).scale.z = 1.12;
-  const shoulders = [-1, 1].map(s => { const o = new THREE.Object3D(); o.position.set(s*.235, .5, -.02); torso.add(o); return o; });
-  const caps = [-1, 1].map(s => { const c = mesh(new THREE.SphereGeometry(.105, 14, 10), tm.shoulder, torso, s*.225, .5, -.02); c.scale.set(1, .85, .95); return c; });
-  function makeSkate(parent){
-    const g = new THREE.Group(); parent.add(g);
-    mesh(new THREE.BoxGeometry(.1, .13, .2), Mt.boot, g, 0, .1, .02);
-    mesh(new THREE.SphereGeometry(.055, 12, 8), Mt.boot, g, 0, .075, -.1).scale.set(.95, .75, 1.3);
-    mesh(new THREE.BoxGeometry(.075, .1, .035), Mt.boot, g, 0, .19, .11);
-    mesh(new THREE.BoxGeometry(.03, .05, .27), Mt.holder, g, 0, .028, -.01);
-    mesh(new THREE.BoxGeometry(.006, .02, .29), Mt.steel, g, 0, .008, -.01);
-    return g;
-  }
-  const LEGS = [0, 1].map(() => ({ thigh: limb(.112, .085, tm.leg, S.root), knee: mesh(new THREE.SphereGeometry(.078, 12, 10), tm.sockPlain, S.root), shin: limb(.072, .054, tm.sock, S.root), skate: makeSkate(S.root) }));
-  const ARMS = [0, 1].map(() => ({
-    upper: limb(.088, .08, mm.upper, S.root, 16), elbow: mesh(new THREE.SphereGeometry(.08, 12, 10), tm.elbow, S.root), fore: limb(.08, .07, mm.fore, S.root, 16),
-    cuff: mesh(new THREE.CylinderGeometry(.07, .064, .12, 12), tm.cuff, S.root), glove: makeGlove(tm.glove, tm.cuff)
-  }));
-  const stick = makeStick(1.42, .3, 135); S.root.add(stick);
-  function makeGlove(m1, m2){
-    const g = new THREE.Group(); S.root.add(g);
-    const palm = mesh(new THREE.BoxGeometry(.105, .1, .11), m1, g, 0, .02, 0);
-    const fing = mesh(new THREE.SphereGeometry(.062, 12, 10), m1, g, 0, .075, -.005); fing.scale.set(.95, .8, 1);
-    const roll = mesh(new THREE.CylinderGeometry(.06, .06, .11, 10), m2, g, 0, .035, .045); roll.rotation.z = Math.PI/2;
-    g.parts = [palm, fing, roll];
-    return g;
-  }
-  slim(S.root);
-  S.setKit = function(abbr, name, num, hand){
-    const T = teamMats(abbr), M = manMats(abbr, name, num);
-    pants.material = T.pants; sweater.material = M.torso; collar.material = T.collar;
-    helm.material = T.helm; helmBits.forEach(b => b.material = T.helm);
-    caps.forEach(c => c.material = T.shoulder);
-    LEGS.forEach(L => { L.thigh.material = T.leg; L.knee.material = T.sockPlain; L.shin.material = T.sock; });
-    ARMS.forEach(A => { A.upper.material = M.upper; A.fore.material = M.fore; A.elbow.material = T.elbow; A.cuff.material = T.cuff; A.glove.parts[0].material = A.glove.parts[1].material = T.glove; A.glove.parts[2].material = T.cuff; });
-    const sk = skinMats[seedOf(name) % skinMats.length]; face.material = sk; neck.material = sk;
-    S.hand = hand === 'R' ? 'R' : 'L'; S.abbr = abbr; S.name = name; S.num = num;
-  };
-  const tmpR = V();
-  /* the pose is always written for a left shot (blade on his left, -x); a right shot is its mirror image */
-  S.pose = function(Pq){
-    const m = S.hand === 'R' ? -1 : 1;
-    let Pz = Pq;
-    if(m < 0){
-      const mir = v => V(-v.x, v.y, v.z);
-      Pz = { ...Pq, px: -Pq.px, twist: -Pq.twist, roll: -(Pq.roll || 0), Hh: mir(Pq.Hh), Bt: mir(Pq.Bt),
-        feet: [Pq.feet[1], Pq.feet[0]].map(f => ({ p: mir(f.p), yaw: -f.yaw, push: f.push })) };
-    }
-    pelvisG.position.set(Pz.px, Pz.py, 0); pelvisG.rotation.set(Pz.lean*.3, Pz.twist*.45, 0, 'YXZ');
-    torso.position.set(Pz.px, Pz.py, 0); torso.rotation.set(Pz.lean, Pz.twist, Pz.roll || 0, 'YXZ');
-    head.rotation.x = -Pz.lean*.8 + (Pz.look || 0);
-    S.root.updateMatrixWorld(true);
-    for(let i = 0; i < 2; i++){
-      const s = i ? 1 : -1, L = LEGS[i], f = Pz.feet[i];
-      const hip = V(s*.1, -.13, 0).applyMatrix4(pelvisG.matrix), ank = f.p.clone(); ank.y += .13;
-      const r = ik(hip, ank, .45, .44, V(s*.2, 0, -1));
-      place(L.thigh, hip, r.mid); place(L.shin, r.mid, r.end); L.knee.position.copy(r.mid);
-      L.skate.position.set(r.end.x, r.end.y - .13, r.end.z); L.skate.rotation.set(0, f.yaw, -s*.08*(f.p.y > .01 ? 0 : 1));
-    }
-    const U = V().subVectors(Pz.Bt, Pz.Hh).normalize();
-    const lo = Pz.Bt.clone().addScaledVector(U, -(Pz.gap || .46)), hi = Pz.Bt.clone().addScaledVector(U, -.04);
-    const hands = m > 0 ? [lo, hi] : [hi, lo];
-    tmpR.set(1, 0, 0).applyEuler(torso.rotation);
-    for(let i = 0; i < 2; i++){
-      const s = i ? 1 : -1, A = ARMS[i];
-      const sh = shoulders[i].position.clone().applyMatrix4(torso.matrix);
-      const r = ik(sh, hands[i], .33, .34, V(s, -.5, .6));
-      const out = tmpR.clone().multiplyScalar(s);
-      placeOut(A.upper, sh, r.mid, out); A.elbow.position.copy(r.mid);
-      const fd = V().subVectors(r.end, r.mid).normalize(), wrist = r.end.clone().addScaledVector(fd, -.075);
-      placeOut(A.fore, r.mid, wrist, out); orient(A.cuff, wrist, fd); orient(A.glove, r.end, fd);
-    }
-    const hd = placeStick(stick, Pz.Hh, Pz.Bt);
-    return { hd, Hh: Pz.Hh };
-  };
-  return S;
-}
+/* ===================================== THE SKATER =====================================
+   Built, dressed and moved in app/faceoff/skater3d.js: one skinned mesh per man (kit, gear and
+   stick in one draw call), a bone rig, the stride, the stop, the shots. This file says where he
+   is and what he is doing. */
+const SK = P.skater3d({ world, cam, seedOf, kitOf, sleeveOf, paintTorso, paintUpper, paintFore, paintSocks, paintTex, PROF, SHOULDER_CM });
+function makeSkater(){ return SK.make(); }
 
 /* ===================================== THE GOALIE =====================================
-   He faces +z in his net's frame, catches with his left hand (+x), blocker and stick in the right. */
-function makeGoalie(){
-  const G = { base: new THREE.Group() }; world.add(G.base);
-  const tm = teamMats('EDM'), mm = manMats('EDM', '', '');
-  const gG = new THREE.Group(); gG.position.set(0, 0, .38); G.base.add(gG);
-  const gPelvis = new THREE.Group(); gG.add(gPelvis);
-  const pants = mesh(new THREE.CylinderGeometry(.25, .28, .3, 16), tm.pants, gPelvis, 0, -.06, 0); pants.scale.z = .8;
-  const gTorso = new THREE.Group(); gG.add(gTorso);
-  /* the goalie's sweater is the same lathe, cut bigger and turned to face +z, so his crest is on show */
-  const sweater = mesh(TORSO_GEO, mm.torso, gTorso); sweater.scale.set(1.2, .95, .86); sweater.rotation.y = Math.PI;
-  const pads = [-1, 1].map(s => { const c = mesh(new THREE.SphereGeometry(.16, 14, 10), tm.shoulder, gTorso, s*.3, .5, 0); c.scale.set(1, .8, 1); return c; });
-  const gHead = new THREE.Group(); gHead.position.set(0, .62, .04); gTorso.add(gHead);
-  const mask = mesh(new THREE.SphereGeometry(.14, 24, 16), tm.gmask, gHead, 0, .1, 0); mask.scale.set(.92, 1.08, 1);
-  const cage = new THREE.Mesh(new THREE.SphereGeometry(.152, 8, 6, Math.PI/2 - .75, 1.5, Math.PI*.42, Math.PI*.38), Mt.cage); cage.position.set(0, .1, .01); gHead.add(cage);
-  const gShoulders = [-1, 1].map(s => { const o = new THREE.Object3D(); o.position.set(s*.3, .5, 0); gTorso.add(o); return o; });
-  const PADS = [-1, 1].map(s => {
-    const p = new THREE.Group(); gG.add(p);
-    const face = mesh(new THREE.BoxGeometry(.27, .84, .13), tm.gpad, p, 0, -.38, .02);
-    mesh(new THREE.BoxGeometry(.22, .14, .17), tm.gwhite, p, 0, .02, 0);
-    mesh(new THREE.CylinderGeometry(.045, .045, .82, 10), tm.gwhite, p, s*.13, -.38, .03);
-    return { p, s, face, thigh: limb(.13, .11, tm.leg, gG) };
-  });
-  const gArms = [0, 1].map(() => ({ upper: limb(.1, .09, mm.upper, gG, 16), fore: limb(.09, .08, mm.fore, gG, 16) }));
-  const trapper = new THREE.Group(); gG.add(trapper);
-  const trapCup = mesh(new THREE.SphereGeometry(.15, 18, 12, 0, Math.PI*2, 0, Math.PI/2), tm.gtrap, trapper); trapCup.rotation.x = -Math.PI/2; trapCup.scale.set(1, .6, 1.2);
-  mesh(new THREE.BoxGeometry(.1, .2, .1), tm.gwhite, trapper, -.02, -.14, -.06);
-  const trapT = mesh(new THREE.BoxGeometry(.03, .16, .02), tm.gaccent, trapper, 0, .02, -.08);
-  const blocker = new THREE.Group(); gG.add(blocker);
-  const blockFace = mesh(new THREE.BoxGeometry(.21, .37, .05), tm.gblock, blocker, -.05, .03, .04);
-  mesh(new THREE.CylinderGeometry(.07, .07, .14, 12), tm.gwhite, blocker, .02, -.06, -.02);
-  const gStick = makeStick(1.48, .38, 122, { paddle: .62, bladeH: .09, curve: .05, tape: tm.gwhite }); gG.add(gStick);
-  slim(G.base);
-  G.trapper = trapper;
-  G.setKit = function(abbr, name, num){
-    const T = teamMats(abbr), M = manMats(abbr, name, num);
-    pants.material = T.pants; sweater.material = M.torso; pads.forEach(p => p.material = T.shoulder); mask.material = T.gmask;
-    PADS.forEach(p => { p.face.material = T.gpad; p.thigh.material = T.leg; });
-    gArms.forEach(a => { a.upper.material = M.upper; a.fore.material = M.fore; });
-    trapCup.material = T.gtrap; trapT.material = T.gaccent; blockFace.material = T.gblock;
-    G.abbr = abbr; G.name = name; G.num = num;
-  };
-  const tmpR = V();
-  /* where he stands in his crease, smoothed, so he shuffles and squares up instead of snapping */
-  G.trk = { x: 0, z: .38, yaw: 0, ready: 0, slump: 0 };
-  G.pose = function(Pq){
-    gG.position.set(Pq.x, 0, Pq.z == null ? .38 : Pq.z); gG.rotation.set(0, Pq.yaw, Pq.roll);
-    const rd = Pq.ready || 0, sl = Pq.slump || 0;
-    const py = lerp(.6, .36, Pq.splay) - .06*rd*(1 - Pq.splay) + .04*sl;
-    gPelvis.position.set(0, py, -.02); gTorso.position.set(0, py, -.02); gTorso.rotation.x = .3 - .12*Pq.splay + .1*rd + .4*sl;
-    gHead.rotation.x = -.25 + .1*Pq.splay - .08*rd + .45*sl;
-    gG.updateMatrixWorld(true);
-    for(const pd of PADS){
-      const s = pd.s, knee = vl(V(s*.17, .45, .2), V(s*.15, .11, .25), Pq.splay);
-      pd.p.position.copy(knee); pd.p.rotation.set(-.1*(1 - Pq.splay), 0, s*lerp(.1, 1.42, Pq.splay));
-      place(pd.thigh, V(s*.13, -.1, 0).applyMatrix4(gPelvis.matrix), knee);
-    }
-    const ends = [];
-    tmpR.set(1, 0, 0).applyEuler(gTorso.rotation);
-    [Pq.block, Pq.glove].forEach((T, i) => {
-      const s = i ? 1 : -1, A = gArms[i], sh = gShoulders[i].position.clone().applyMatrix4(gTorso.matrix);
-      const r = ik(sh, T, .33, .35, V(s, -.6, -.5)), out = tmpR.clone().multiplyScalar(s);
-      placeOut(A.upper, sh, r.mid, out); placeOut(A.fore, r.mid, r.end, out); ends.push(r.end);
-    });
-    blocker.position.copy(ends[0]); trapper.position.copy(ends[1]);
-    trapper.rotation.set(0, -.25, -.2);
-    const grip = ends[0], Hh = V(grip.x + .34, Math.max(.045, grip.y - .7), grip.z + .22);
-    placeStick(gStick, Hh, Hh.clone().add(grip.clone().sub(Hh).normalize().multiplyScalar(1.48)));
-  };
-  /* which end he is in: 0 the north net, 1 the south */
-  G.setEnd = function(end){ G.end = end; G.base.position.set(0, 0, end ? GS : 0); G.base.rotation.y = end ? Math.PI : 0; };
-  G.setEnd(0);
-  return G;
-}
+   Built, dressed and moved in app/faceoff/goalie3d.js: one skinned mesh per goalie (pads, trapper,
+   blocker, chest and arms under the sweater, mask and cage, stick) in one draw call, a bone rig,
+   the stance, the shuffle and T-push, the saves. He faces +z in his net's frame, catches with his
+   left hand (+x), blocker and stick in the right. Its timeline and the shot are read late (they are
+   declared further down). */
+let GKIT = null;
+const goalieKit = () => GKIT || (GKIT = P.goalie3d({ parent: world, aniso: ANISO, GS,
+  get puck(){ return puck; }, get K(){ return K; }, shot: () => ({ guess, spot: shotSpot, scored, id: shotT0 }) }));
+function makeGoalie(){ return goalieKit().makeGoalie(); }
 
 /* ---- snow off the skates ---- */
 const NP = 420, pPos = new Float32Array(NP*3), pVel = new Float32Array(NP*3), pLife = new Float32Array(NP);
@@ -817,57 +657,14 @@ function rootAt(u){
   const a = clamp((u - K.shot)/(1 - K.shot)); x -= m*(.25*a + 1.1*a*a); z -= .9*a*(1 - .5*a);
   return [x, z];
 }
-/* a stride: push out and back, recover under the body. cross > 0 is a turn to his left: the
-   right (outside) foot steps over the left on the way back, a crossover; cross < 0 the mirror */
-function strideFeet(amt, ph, back, cross = 0){
-  return [0, 1].map(i => {
-    const s = i ? 1 : -1, g = { p: V(s*.21, 0, s < 0 ? -.1 : .12), out: .08 };
-    let st = g;
-    if(amt > 0){
-      const p = frac(ph + (i ? .5 : 0)), bz = back ? -1 : 1;
-      const ov = cross*s > 0 ? Math.min(1, Math.abs(cross)) : 0, xin = lerp(.12, -.17, ov), xout = .48 - .1*ov;
-      if(p < .55){ const q = p/.55; st = { p: V(s*lerp(xin, xout, q), 0, bz*(-.08 + .42*q)), out: .25 + .4*q - .2*ov }; }
-      else { const q = (p - .55)/.45; st = { p: V(s*lerp(xout, xin, q), (.13 + .06*ov)*Math.sin(q*Math.PI), bz*lerp(.34, -.08, q)), out: lerp(.65, .1, q) - .2*ov }; }
-    }
-    return { p: vl(g.p, st.p, amt), yaw: -s*lerp(g.out, st.out, amt)*(back ? -1 : 1), push: amt > .5 ? frac(ph + (i ? .5 : 0)) : -1 };
-  });
-}
+/* the shooter's body through the attempt: app/faceoff/skater3d.js (wrist shot, snapshot, one-timer) */
+let shotKind = '', oneAt = null, oneFrom = null;
 function skaterPose(u, t, idle){
-  const Pq = { px: 0, py: .85, lean: -.55, twist: 0, roll: 0, gap: .46 };
-  let amt = 0, ph = 0;
-  if(!idle){ amt = clamp((u - K.go)/.03)*(1 - clamp((u - .34)/.06)); ph = (u - K.go)*DUR/1000*2.3; }
-  Pq.feet = strideFeet(amt, ph, false);
-  Pq.px = .06*Math.sin(ph*2*Math.PI)*amt; Pq.py = .85 + .02*Math.cos(ph*4*Math.PI)*amt;
-  Pq.twist = .12*Math.sin(ph*2*Math.PI)*amt; Pq.lean = -.55 - .08*amt;
-  const base = V(-.55, .04, -1.05), loadP = V(-.72, .04, -.6);
-  let Hh = base.clone(), Bq = V(.12, .92, -.5);
-  if(idle){ Hh.x += .1*Math.sin(t*4.2); Hh.z += .05*Math.cos(t*4.2); }
-  else if(u < K.deke){ Hh.x += .13*Math.sin((u - K.go)*DUR/1000*2*Math.PI*1.4); }
-  else if(u < K.load){ const d = (u - K.deke)/(K.load - K.deke), o = Math.sin(d*Math.PI); Hh.x += o*.8; Hh.z += o*.18; Pq.twist -= o*.25; Bq.x += o*.15; }
-  else if(u < K.sweep){ const l = ease((u - K.load)/(K.sweep - K.load)); Hh = vl(base, loadP, l); Pq.twist += .32*l; Bq = vl(Bq, V(.22, .98, -.36), l); }
-  else {
-    const r = ease(clamp((u - K.sweep)/.065)); Hh = vl(loadP, V(-.15, .5, -1.5), r); Pq.twist += lerp(.32, -.38, r);
-    Bq = vl(V(.22, .98, -.36), V(-.02, 1.02, -.62), r); Pq.lean = lerp(-.6, -.42, r);
-    Hh.lerp(V(-.3, .1, -1.25), clamp((u - .76)/.1)*.6);
-  }
-  const Bt = Hh.clone().add(Bq.clone().sub(Hh).normalize().multiplyScalar(SL));
-  const c = scored && !idle ? ease(clamp((u - .76)/.1)) : 0;
-  if(c > 0) celeStick(Pq, Hh, Bt, c);
-  else { Pq.Hh = Hh; Pq.Bt = Bt; }
-  return Pq;
+  const sp = SPOTS[shotSpot];
+  return SK.shotPose(SH, u, t, idle, { K, DUR, scored, kind: shotKind, reduced: reduced(), high: !!(sp && sp.p[1] > .5) });
 }
-/* the stick up, the arms with it */
-function celeStick(Pq, Hh, Bt, c, pump = 0){
-  const Bc = V(.26, 1.78 + pump, -.12), Hc = Bc.clone().add(V(-.35, .85, -.4).normalize().multiplyScalar(SL));
-  Bt = Bt.clone().lerp(Bc, c); Hh = Hh.clone().lerp(Hc, c); Hh = Bt.clone().add(Hh.clone().sub(Bt).normalize().multiplyScalar(SL));
-  Pq.lean = lerp(Pq.lean, -.12, c); Pq.twist = lerp(Pq.twist, -.15, c); Pq.gap = lerp(.46, .3, c);
-  Pq.Hh = Hh; Pq.Bt = Bt;
-}
-function bladeWorld(actor, r){
-  const n = V(r.hd.z, 0, -r.hd.x); if(n.z > 0) n.negate();
-  const p = r.Hh.clone().addScaledVector(r.hd, .13).addScaledVector(n, .05); p.y = Math.max(.013, r.Hh.y - .02);
-  return actor.root.localToWorld(p);
-}
+/* where the puck sits on his blade, on the ice */
+function bladeWorld(actor, r){ const p = actor.root.localToWorld(r.blade.clone()); p.y = .013; return p; }
 function setShooter(u, t, idle){
   const [x, z] = rootAt(idle ? 0 : u), [x2, z2] = rootAt(Math.min(.995, (idle ? 0 : u) + .01));
   const dx = idle ? END[0] - START[0] : x2 - x, dz = idle ? END[1] - START[1] : z2 - z;
@@ -882,45 +679,11 @@ const SPOTS = {
   lg: { n: 'Low glove', s: 'Low', p: [.7, .15] },
   lb: { n: 'Low blocker', s: 'Low', p: [-.7, .15] }
 };
-const G0 = { glove: V(.43, .84, .3), block: V(-.43, .7, .32) };
-const SAVES = {
-  gh: { x: .12, roll: -.08, glove: V(.6, 1.02, .34) },
-  bh: { x: -.12, roll: .08, block: V(-.6, .96, .35) },
-  fh: { splay: 1 },
-  lg: { x: .22, roll: -.14, splay: 1, glove: V(.6, .36, .36) },
-  lb: { x: -.22, roll: .14, splay: 1, block: V(-.62, .33, .36) }
-};
-/* the goalie follows the puck round his crease: out to challenge when it is close, square to it,
-   down into his stance once it is in his end. Smoothed, so he shuffles and pushes, never snaps */
-const tmpG = V();
-function trackGoalie(g, dt){
-  const pl = g.base.worldToLocal(tmpG.copy(puck.position)), tr = g.trk;
-  const ang = clamp(Math.atan2(pl.x, Math.max(.4, pl.z - .2)), -1.2, 1.2), dist = Math.hypot(pl.x, pl.z);
-  const near = clamp(1 - (dist - 5)/20), R0 = .12 + .42*near*(1 - .45*Math.abs(ang));
-  const k = 1 - Math.exp(-dt*5.5), ky = 1 - Math.exp(-dt*7);
-  tr.x += (clamp(Math.sin(ang)*R0*1.25, -.62, .62) - tr.x)*k;
-  tr.z += (.3 + Math.cos(ang)*R0 - tr.z)*k;
-  tr.yaw += (ang*.82 - tr.yaw)*ky;
-  tr.ready += ((dist < 22 ? 1 : 0) - tr.ready)*(1 - Math.exp(-dt*3));
-  tr.slump = Math.max(0, tr.slump - dt*.35);
-}
-function goaliePose(u, t, idle, pw, seed, g){
-  const Pq = { x: 0, yaw: 0, roll: 0, splay: 0, glove: G0.glove.clone(), block: G0.block.clone() };
-  if(g && g.trk){ const tr = g.trk; Pq.x = tr.x; Pq.z = tr.z; Pq.yaw = tr.yaw; Pq.ready = tr.ready; Pq.slump = Math.min(1, tr.slump); }
-  else { Pq.x = Math.max(-.22, Math.min(.22, pw.x*.3)); Pq.yaw = Math.max(-.45, Math.min(.45, Math.atan2(pw.x - Pq.x, Math.max(1, pw.z - .38))*.75)); }
-  /* ready: the glove open and out front, the blocker up */
-  const rd = (Pq.ready || 0)*(1 - (Pq.slump || 0));
-  Pq.glove.lerp(V(.5, .66, .44), .7*rd); Pq.block.lerp(V(-.46, .6, .42), .6*rd);
-  Pq.glove.y += Math.sin(t*2 + seed)*.012; Pq.block.y += Math.sin(t*2 + 1 + seed)*.01;
-  if(!idle){
-    const k = ease(clamp((u - (K.shot - .025))/.075)), S = SAVES[guess];
-    Pq.x = lerp(Pq.x, S.x || 0, k); Pq.z = lerp(Pq.z == null ? .38 : Pq.z, .42, k); Pq.roll = lerp(0, S.roll || 0, k); Pq.splay = (S.splay || 0)*k; Pq.yaw = lerp(Pq.yaw, 0, k);
-    if(S.glove) Pq.glove.lerp(S.glove, k); else if(S.splay) Pq.glove.lerp(V(.36, .56, .36), k);
-    if(S.block) Pq.block.lerp(S.block, k); else if(S.splay) Pq.block.lerp(V(-.36, .5, .36), k);
-  }
-  return Pq;
-}
+/* the goalie follows the puck round his crease (shuffles, T-pushes, the post), and plays his save */
+function trackGoalie(g, dt){ goalieKit().trackGoalie(g, dt); }
+function goaliePose(u, t, idle, pw, seed, g){ return goalieKit().goaliePose(u, t, idle, pw, seed, g); }
 let lastU = 0, lastHitU = 0, padSprayed = false, shotLive = false, shotClock = 0, slow = 0;
+let hitW = null;                   /* where a save met the puck: the rebound starts there */
 /* runs the shot, or the shooter waiting at the line. The clock runs slow from the load to the
    moment it reaches the net: the bit everyone leans in for */
 function runShot(now, t, dt){
@@ -934,14 +697,19 @@ function runShot(now, t, dt){
   if(!idle && u >= K.shot && !releaseW){ const s = setShooter(K.shot, t, false); releaseW = bladeWorld(SH, s.r); }
   const { Pq, r } = setShooter(u, t, idle);
   const S = SPOTS[shotSpot].p, target = V(S[0], S[1], .03);
-  if(idle || u < K.shot){ puck.position.copy(bladeWorld(SH, r)); puck.rotation.set(0, 0, 0); }
-  else if(u < K.hit){ const f = (u - K.shot)/(K.hit - K.shot); puck.position.copy(vl(releaseW, target, f)); puck.position.y += Math.sin(f*Math.PI)*.06; puck.rotation.x += .6; }
+  if(shotKind === 'one' && !idle && u >= K.deke && u < K.shot){
+    /* a one-timer: the puck goes on ahead into the spot where the blade will come down */
+    if(!oneAt){ const s1 = setShooter(K.shot, t, false); oneAt = bladeWorld(SH, s1.r); oneFrom = puck.position.clone(); setShooter(u, t, idle); }
+    const f = clamp((u - K.deke)/(K.shot - K.deke)); puck.position.copy(vl(oneFrom, oneAt, 1 - Math.pow(1 - f, 1.7))); puck.rotation.y += .3;
+  }
+  else if(idle || u < K.shot){ puck.position.copy(bladeWorld(SH, r)); puck.rotation.set(0, 0, 0); }
+  else if(u < K.hit){ const f = (u - K.shot)/(K.hit - K.shot), tgt = scored ? target : (hitW = GNo.contact(shotSpot)); puck.position.copy(vl(releaseW, tgt, f)); puck.position.y += Math.sin(f*Math.PI)*.06; puck.rotation.x += .6; }
   else {
-    const f = clamp((u - K.hit)/(K.end - K.hit));
+    const f = clamp((u - K.hit)/(K.end - K.hit)), h0 = hitW || target;
     if(scored){ const drop = clamp((f - .25)/.5); puck.position.set(S[0]*.8, lerp(S[1], .016, ease(drop)), lerp(.03, -.82, Math.sqrt(clamp(f/.35)))); }
     else if(shotSpot === 'gh'){ GNo.trapper.updateMatrixWorld(true); GNo.trapper.getWorldPosition(puck.position); puck.position.z += .02; }
-    else if(shotSpot === 'bh'){ puck.position.set(S[0] - f*2.6, Math.max(.016, S[1] + f*1.4 - f*f*2.6), lerp(.4, 1.6, f)); puck.rotation.z += .4; }
-    else { const side = S[0] > .1 ? 1 : S[0] < -.1 ? -1 : .3; puck.position.set(S[0] + side*f*1.2, .016, lerp(.5, 2.6, f)); }
+    else if(shotSpot === 'bh'){ puck.position.set(h0.x - f*2.6, Math.max(.016, h0.y + f*1.4 - f*f*2.6), lerp(h0.z, 1.6, f)); puck.rotation.z += .4; }
+    else { const side = S[0] > .1 ? 1 : S[0] < -.1 ? -1 : .3; puck.position.set(h0.x + side*f*1.2, lerp(h0.y, .016, clamp(f*5)), lerp(h0.z, 2.6, f)); }
   }
   if(idle || u < K.shot) trackGoalie(GNo, dt);
   const pg = goaliePose(u, t, idle, puck.position, 0, GNo);
@@ -1124,41 +892,8 @@ function steer(s, dt){
   s.ph += dt*(.55 + speed*.3);
   s.speed = speed;
 }
-function matchPose(s, t, now){
-  const m = s.hand === 'R' ? -1 : 1, gl = s.glide || 0, ks = s.stopK ? ease(Math.min(1, s.stopK*1.5)) : 0;
-  const amt = s.amt*(1 - .62*gl)*(1 - ks), ph = s.ph;
-  const cross = s.back ? 0 : clamp(s.turn/2.4, -1, 1)*clamp((s.speed - 1.6)/2.2)*m;
-  const Pq = { px: .06*Math.sin(ph*2*Math.PI)*amt, py: .86 + .02*Math.cos(ph*4*Math.PI)*amt - .04*gl - .1*ks, lean: -.4 - .22*s.amt + .08*gl + .12*ks,
-    twist: .12*Math.sin(ph*2*Math.PI)*amt, roll: clamp(-s.turn*.14, -.4, .4)*m, gap: .46 };
-  Pq.feet = strideFeet(amt, ph, s.back, cross);
-  if(ks > 0){ const wide = [{ p: V(-.33, 0, .05), yaw: .12 }, { p: V(.33, 0, -.05), yaw: -.12 }]; Pq.feet = Pq.feet.map((f, i) => ({ p: vl(f.p, wide[i].p, ks), yaw: lerp(f.yaw, wide[i].yaw, ks), push: -1 })); }
-  let Hh = V(-.5, .03, -1.0), Bq = V(.12, .92, -.5);
-  const k = (now - s.t0)/1000;
-  const crouch = [{ p: V(-.3, 0, .05), yaw: .3, push: -1 }, { p: V(.3, 0, .05), yaw: -.3, push: -1 }];
-  if(s.mode === 'carry'){
-    /* stickhandling: the puck rocked from forehand to backhand in a figure eight, head up */
-    const w2 = t*(6.4 - 1.6*s.amt) + s.seed;
-    Hh.x += .2*Math.sin(w2); Hh.z += .08*Math.sin(2*w2); Bq.x += .06*Math.sin(w2); Pq.lean -= .06; Pq.look = .12;
-    /* a pass just arrived: the blade gives with it */
-    const cu = (now - (s.cushT || 0))/280; if(cu < 1){ const c = Math.sin(cu*Math.PI); Hh.z += .3*c; Hh.x -= .1*c; Pq.twist -= .1*c; }
-  }
-  else if(s.mode === 'recv'){ Hh = V(-.68, .03, -1.22); Pq.twist -= .18; Pq.lean -= .05; }
-  else if(s.mode === 'pass'){
-    const q = clamp(k/.34);
-    if(q < .45){ const l = ease(q/.45); Hh = vl(V(-.5, .03, -1.0), V(-.82, .03, -.42), l); Pq.twist += .3*l; }
-    else { const l = ease((q - .45)/.55); Hh = vl(V(-.82, .03, -.42), V(-.05, .1, -1.45), l); Pq.twist += lerp(.3, -.35, l); Bq = vl(Bq, V(-.02, 1.0, -.6), l); }
-  }
-  else if(s.mode === 'lunge'){ const l = ease(clamp(k/.25)); Hh = vl(Hh, V(-.9, .03, -1.35), l); Pq.lean -= .3*l; Pq.py -= .1*l; }
-  else if(s.mode === 'faceoff'){ Pq.lean = -1.0; Pq.py = .7; Hh = V(-.1, .03, -.95); Bq = V(.1, .72, -.48); Pq.feet = crouch; Hh.x += .02*Math.sin(t*9 + s.seed); }
-  else if(s.mode === 'draw'){ const l = ease(clamp(k/.3)); Pq.lean = -1.0 + .3*l; Pq.py = .7 + .1*l; Hh = vl(V(-.1, .03, -.95), V(-.55, .03, -.2), l); Bq = V(.1, .78, -.4); Pq.feet = crouch; }
-  else if(s.mode === 'sad'){ Pq.lean = lerp(Pq.lean, -.16, .85); Pq.look = -.38; Hh = V(-.32, .03, -.7); Bq = V(.08, .96, -.28); }
-  else if(s.follow){ /* active stick in the lane, down in his stance */ Hh = V(-.72, .03, -1.15); Pq.lean -= .1; Pq.py -= .03; Hh.x += .06*Math.sin(t*2.1 + s.seed); }
-  else Hh.x += .04*Math.sin(t*1.3 + s.seed);
-  const Bt = Hh.clone().add(Bq.clone().sub(Hh).normalize().multiplyScalar(SL));
-  if(s.mode === 'cele'){ const c = ease(clamp(k/.4)), pump = reduced() || k < .5 ? 0 : Math.max(0, Math.sin((k - .5)*8))*.24; celeStick(Pq, Hh, Bt, c, pump); Pq.look = .2*c; }
-  else { Pq.Hh = Hh; Pq.Bt = Bt; }
-  return Pq;
-}
+/* each man's body from how he moves and what he is doing: app/faceoff/skater3d.js */
+function matchPose(s, t, now){ return SK.matchPose(s, t, now, reduced()); }
 
 /* ---- on the ice while you choose: the lanes to each team-mate in the colour of what the pass costs,
    red rings under the men marking them, and the rings for the puck carrier and the target ---- */
@@ -1271,6 +1006,7 @@ function runMatch(dt, t, now, shotOwnsPuck){
   for(const w of [0, 1]){
     const g = A[w][0];
     if(shotLive && g === GNo) continue;
+    g.hasPuck = !!(carrier && carrier.w === w && carrier.i === 0 && pk.state === 'carry');
     trackGoalie(g, dt);
     g.pose(goaliePose(0, t, true, null, w*1.7, g));
   }
@@ -1288,19 +1024,17 @@ function focusPoint(){
 let showAng = 0, showCur = 0;
 function runShow(t, dt){
   SO.root.position.set(0, 0, 5.2); SO.root.rotation.y = 0;
-  const Pq = skaterPose(0, t, true);
-  /* stood up straight so the crest shows, stick down by his side */
-  Pq.lean = -.16; Pq.py = .93; Pq.twist = .05*Math.sin(t*.8);
-  Pq.Hh = V(-.62 + .05*Math.sin(t*1.3), .03, -.55); Pq.Bt = Pq.Hh.clone().add(V(.5, 1.05, .32).normalize().multiplyScalar(SL)); Pq.gap = .5;
-  const r = SO.pose(Pq);
+  /* stood up straight so the crest shows, the stick resting on the ice by his side */
+  const r = SO.pose(SK.showPose(SO, t));
   puck.position.copy(bladeWorld(SO, r));
-  GNo.pose(goaliePose(0, t, true, puck.position, 0));
+  GNo.pose(goaliePose(0, t, true, puck.position, 0, GNo));
   showCur += wrapA(showAng - showCur)*(1 - Math.exp(-dt*3));
 }
 let shadowWide = false;
 const Tt = V();
 function updateCam(dt, now, shotU){
   const r = reduced();
+  if(mode === 'lab'){ SK.labCam(cam, key, dt); return; }
   if(mode === 'show'){
     const a = showCur + (r ? 0 : Math.sin(now/1000*.5)*.45);
     cam.position.set(Math.sin(a)*3.1, 1.45, 5.2 + Math.cos(a)*3.1); cam.lookAt(0, 1.0, 5.2); setFov(aspect < 1 ? 34 : 28);
@@ -1447,6 +1181,7 @@ function render(now){
   let su = 0, shotOwns = false;
   if(mode === 'shootout' || shotLive){ su = runShot(now, t, dt); shotOwns = true; }
   if(mode === 'show') runShow(t, dt);
+  if(mode === 'lab'){ puck.position.copy(SK.labStep(SO, t, dt, { K, DUR, ZC })); puck.position.y = .013; }
   if(mode === 'match'){
     runMatch(dt, t, now, shotOwns);
     /* on the clock, not the frame count, so a slow phone still gets there */
@@ -1510,8 +1245,9 @@ const wait = ms => new Promise(r => setTimeout(r, reduced() ? Math.min(ms, 500) 
 function setMode(m){
   mode = m;
   for(const s of skaters()) s.root.visible = m === 'match';
-  SO.root.visible = m === 'shootout' || m === 'show';
+  SO.root.visible = m === 'shootout' || m === 'show' || m === 'lab';
   for(const w of [0, 1]) A[w][0].base.visible = m === 'match';
+  if(m === 'lab'){ shotLive = false; shotBlend = 0; carrier = null; ringTarget = null; state = 'idle'; spotsEl.hidden = true; resEl.hidden = true; flash.className = 'flash'; clearHats(); }
   if(m === 'show'){ GNo = A[1][0]; GNo.setEnd(0); GNo.base.visible = true; shotLive = false; shotBlend = 0; carrier = null; ringTarget = null; state = 'idle'; spotsEl.hidden = true; resEl.hidden = true; flash.className = 'flash'; clearHats(); }
   if(m === 'shootout'){ SH = SO; GNo = A[1][0]; GNo.setEnd(0); GNo.base.visible = true; shotLive = false; shotBlend = 0; camMode = 'play'; carrier = null; ringTarget = null; clearHats(); }
   tagsEl.hidden = m !== 'match';
@@ -1531,9 +1267,9 @@ const api = {
   shootout(sh, go){
     setMode('shootout');
     SO.setKit(sh.team, sh.name || '', sh.number == null ? '' : sh.number, sh.shoots);
-    GNo.setKit(go.team, go.name || '', go.number == null ? '' : go.number);
+    GNo.setKit(go.team, go.name || '', go.number == null ? '' : go.number); GNo.trk.cele = 0; GNo.trk.slump = 0;
     const m = SO.hand === 'R' ? -1 : 1;
-    START = [-1.35*m, 8.6]; END = [-1.0*m, 3.7];
+    START = [-1.35*m, 8.6]; END = [-1.0*m, 3.7]; shotKind = '';
     state = 'idle'; scored = false; flash.className = 'flash'; spotsEl.hidden = true; resEl.hidden = true; shotClock = 0; slow = 0;
   },
   /* the sweater room: sh = { team, name, number, shoots } on the ice, go = the goalie behind him; angle 0 = his back, PI = his front */
@@ -1542,6 +1278,9 @@ const api = {
     if(go) GNo.setKit(go.team, go.name || '', go.number == null ? '' : go.number);
     if(angle != null){ showAng = angle; if(sh) showCur = angle; }
   },
+  /* the skater lab (server/lab-skaters.html): o = { kit, name, num, hand, motion, cam, at, ts, pause, cycle, zoom } */
+  lab(o){ if(mode !== 'lab'){ setMode('lab'); inT = inB = inTc = inBc = 0; applyOffset(); } if(o) SK.labSet(SO, o); return SK.lab; },
+  labMotions: SK.MOTIONS,
   /* the old call, still honoured */
   setKits(sh, go){ api.shootout({ team: sh.team || 'MTL', name: sh.name, number: sh.number, shoots: sh.shoots }, { team: go.team || 'EDM', name: go.name, number: go.number }); },
   /* show the five spots; cb(spotKey) on a tap */
@@ -1549,8 +1288,8 @@ const api = {
   hold(){ state = 'idle'; spotsEl.hidden = true; resEl.hidden = true; if(!shotLive) flash.className = 'flash'; },
   /* play one attempt; resolves a moment after GOAL or SAVE shows */
   shoot(o){
-    shotSpot = o.spot; scored = !!o.scored; guess = o.guess || o.spot;
-    releaseW = null; padSprayed = false; lastU = 0; lastHitU = 0; shotClock = 0; spotsEl.hidden = true; resEl.hidden = true; flash.className = 'flash';
+    shotSpot = o.spot; scored = !!o.scored; guess = o.guess || o.spot; hitW = null;
+    releaseW = null; oneAt = null; padSprayed = false; lastU = 0; lastHitU = 0; shotClock = 0; spotsEl.hidden = true; resEl.hidden = true; flash.className = 'flash';
     resEl.classList.toggle('same', shotSpot === guess);
     state = 'shoot'; shotT0 = performance.now();
     return new Promise(res => { resolveShot = () => { resolveShot = null; setTimeout(res, reduced() ? 500 : 950); }; });
@@ -1573,6 +1312,7 @@ const api = {
       for(const w of [0, 1]){
         A[w].color = T[w].color;
         T[w].men.forEach((m, i) => { const a = A[w][i]; if(i === 0) a.setKit(T[w].abbr, m.back, m.num); else { a.setKit(T[w].abbr, m.back, m.num, m.shoots); a.label = m.label; } });
+        Object.assign(A[w][0].trk, { cele: 0, slump: 0, hold: 0 });
       }
       const paintHome = () => { const img = logo(T[0].abbr, 'light'); if(img){ paintIce(img); return true; } return false; };
       if(!paintHome()) logoWait.push(function once(){ if(!paintHome()) logoWait.push(once); });
@@ -1640,7 +1380,7 @@ const api = {
           };
         };
         if(from.goalie){ setTimeout(go, 160); return; }
-        from.mode = 'pass'; from.t0 = performance.now();
+        from.mode = 'pass'; from.t0 = performance.now(); from.passAt = { x: to.x, z: to.z }; from.saucer = o.tier === 'hard' || o.tier === 'extreme';
         setTimeout(go, 140);
       });
     },
@@ -1669,7 +1409,7 @@ const api = {
     /* the shot: the camera drops in behind him; then pick() shows the spots and shoot() plays it.
        o.kind: 'one' a one-timer (he steps straight into it), 'brk' a breakaway (in alone from the blue line) */
     aim(w, i, o = {}){
-      const s = actor(w, i); SH = s; GNo = A[1 - att][0]; shotLive = true; shotT = performance.now();
+      const s = actor(w, i); SH = s; GNo = A[1 - att][0]; shotLive = true; shotT = performance.now(); shotKind = o.kind || '';
       const m = s.hand === 'R' ? -1 : 1;
       snapBack();
       if(o.kind === 'brk'){ START = [clamp(s.x*.5, -4, 4), 15.5]; END = [clamp(-.9*m, -2.2, 2.2), 3.6]; }
@@ -1694,6 +1434,8 @@ const api = {
     },
     /* the goalie covers it */
     toGoalie(w){ carrier = { w, i: 0 }; pk.state = 'carry'; setTags(); },
+    /* the final horn: the winning goalie's arms go up, the other one's head goes down (abbr = the winners) */
+    goalieWin(abbr){ for(const w of [0, 1]){ const g = A[w][0]; if(!g.base.visible) continue; if(g.abbr === abbr) g.trk.cele = 1; else g.trk.slump = 2.6; } },
     /* the goal: lights, the scorer's stick up and pumping, team-mates in on him, heads down on the other side, the camera round him */
     celebrate(w, i){
       const s = actor(w, i); s.mode = 'cele'; s.t0 = performance.now(); s.follow = null;
@@ -1704,7 +1446,7 @@ const api = {
       cubeBig = 'GOAL'; paintCube();
       for(const o of skaters()){
         if(o === s) continue; o.follow = null;
-        if(o.w === w){ o.tx = s.tx - side*(.9 + Math.random()); o.tz = 7 + (Math.random() - .5)*2.4; o.vmax = 8; o.face = s.root.position; }
+        if(o.w === w){ o.tx = s.tx - side*(.9 + Math.random()); o.tz = 7 + (Math.random() - .5)*2.4; o.vmax = 8; o.face = s.root.position; o.mode = 'join'; o.t0 = performance.now() + 500 + Math.random()*500; }
         else { o.tx = o.x*.7; o.tz = o.z + 4; o.vmax = 3; o.face = null; o.mode = 'sad'; }
       }
       carrier = null; snapBack(); setTags();

@@ -1,0 +1,1280 @@
+/* PUCK: the skaters of the 3D rink (three.js r128, plain script, no modules).
+
+   ONE SKINNED MESH PER MAN. Sweater, shoulder pads, hockey pants, socks over the
+   shin guards, skates, gloves, helmet, face and stick are a single geometry in a
+   single draw call; the visor is a second one, because it is see-through. The
+   geometry is built once from lofted rings, lathes and extrusions and shared by
+   every man. What makes a man HIS is a 1024x1024 texture atlas painted from his
+   team's row in app/assets/kits.js with his name and number (the sweater keeps
+   the old lathe layout, so paintTorso/paintUpper/paintFore paint it unchanged),
+   and his own skeleton.
+
+   THE BONES ARE NOT IN THE SCENE GRAPH. Each is a matrix in the man's own space
+   and the mesh skins 'detached', so the mirrored reflection pass, the shadow pass
+   and the picture all see the same pose.
+
+   A POSE IS DATA (feet, pelvis, lean, twist, where the stick is) and solve() turns
+   it into bones: two-bone IK for the legs and arms, the skates flat or on an edge,
+   the stick placed so the blade lies flat on the ice at its lie, the top hand on
+   the knob, the bottom hand down the shaft, fingers round it.
+
+   THE MOTION is procedural and written to look like video of the real thing: the
+   stride (push out and back on the inside edge, toe flick, recovery low under the
+   hips, weight over the gliding skate), the glide, crossovers, backwards C-cuts,
+   the hockey stop, soft hands, passes, wrist shots, snapshots and one-timers with
+   the weight going through, the faceoff crouch, celebrations. Every change of
+   state is eased, feet stay put on the ice when he stands, and far men drop to a
+   lighter mesh.
+
+   Skater space: y up, he faces -z, x is his right. Poses are written for a LEFT
+   shot (blade on his left) and mirrored for a right shot.
+   rink3d.js calls P.skater3d(ctx) once and keeps what it returns. */
+(function(){
+'use strict';
+const P = window.PUCK = window.PUCK || {};
+P.skater3d = function(C){
+const T3 = window.THREE;
+const V = (x = 0, y = 0, z = 0) => new T3.Vector3(x, y, z);
+const lerp = (a, b, t) => a + (b - a)*t, clamp = (t, a = 0, b = 1) => t < a ? a : t > b ? b : t;
+const ease = t => t*t*(3 - 2*t), frac = x => x - Math.floor(x);
+const sst = (a, b, x) => ease(clamp((x - a)/(b - a)));
+const PI = Math.PI, TAU = PI*2;
+const seedOf = C.seedOf;
+
+/* ---- the man, in metres (about 1.86 m, 1.98 on his skates with the helmet) ---- */
+const SL = 1.42;                 /* the stick, heel of the blade to the knob */
+const LIE = 134*PI/180;          /* between the shaft and the blade's bottom edge (a lie 5.5) */
+const BL = .30;                  /* blade, heel to toe */
+const ANK = .125, TH = .44, SN = .45, UA = .315, FA = .28, GRIP = .078;
+const HIPX = .095, HIPY = -.09;
+const SHO = V(.19, .15, .01);    /* shoulder joints, from the chest bone */
+const SPI = V(0, .13, 0), CHE = V(0, .17, 0), NEK = V(0, .222, -.012), HED = V(0, .105, -.004);
+const PY0 = ANK + TH + SN - .012 - HIPY;   /* the pelvis when he stands straight */
+const B = { pel: 0, spi: 1, che: 2, nek: 3, hed: 4, ua: [5, 8], fa: [6, 9], hd: [7, 10], th: [11, 14], sh: [12, 15], ft: [13, 16], stk: [17, 18] };
+const NB = 19;
+
+/* ===================================== THE RIG ===================================== */
+const UPV = V(0, 1, 0), ONE = V(1, 1, 1);
+const _e = new T3.Euler(), _q = new T3.Quaternion(), _m = new T3.Matrix4();
+const iA = V(), iB = V();
+function basis(m, o, X, Y, Z){ m.set(X.x, Y.x, Z.x, o.x, X.y, Y.y, Z.y, o.y, X.z, Y.z, Z.z, o.z, 0, 0, 0, 1); return m; }
+/* two bones from A towards T, the middle joint bent towards `pole`; false when it could not reach */
+function ik(A, T, l1, l2, pole, mid, end){
+  const d = iA.subVectors(T, A); let dist = d.length(); d.divideScalar(dist || 1);
+  const reach = l1 + l2 - .0015, ok = dist <= reach; dist = clamp(dist, .05, reach);
+  const a = (l1*l1 + dist*dist - l2*l2)/(2*dist), h = Math.sqrt(Math.max(0, l1*l1 - a*a));
+  const pd = iB.copy(pole).addScaledVector(d, -pole.dot(d)); if(pd.lengthSq() < 1e-9) pd.set(0, 0, -1); pd.normalize();
+  mid.copy(A).addScaledVector(d, a).addScaledVector(pd, h); end.copy(A).addScaledVector(d, dist);
+  return ok;
+}
+/* the stick's frame from heel and knob: Y up the shaft, the blade at LIE from it, flat on the ice
+   whenever the shaft is no steeper than the lie allows (steeper, and the toe comes up, as on a real
+   stick). m: 1 a left shot, -1 a right shot. Z is the face of the blade, X along it */
+function stickFrame(Hh, Bt, m, X, Y, Z){
+  Y.subVectors(Bt, Hh).normalize();
+  const L = Math.hypot(Y.x, Y.z), up = clamp((.3 - L)/.3);
+  let hx = Y.x, hz = Y.z + .35*up; const hl = Math.hypot(hx, hz) || 1; hx /= hl; hz /= hl;
+  const phi = Math.acos(clamp(Math.cos(LIE)/Math.max(L, 1e-3), -1, 1)), a = -m*phi;
+  X.set(hx*Math.cos(a) + hz*Math.sin(a), 0, -hx*Math.sin(a) + hz*Math.cos(a));
+  X.addScaledVector(Y, -X.dot(Y)); if(X.lengthSq() < 1e-8) X.set(1, 0, 0); X.normalize();
+  Z.crossVectors(X, Y);
+}
+const BLADE_B = V(Math.sin(LIE), Math.cos(LIE), 0), BLADE_H = V(-Math.cos(LIE), Math.sin(LIE), 0);
+const curveAt = a => .024*Math.pow(clamp(a/BL), 2);
+/* where the puck sits on the forehand, in stick space (left stick; z flips for a right one) */
+const PUCK_ON = V().addScaledVector(BLADE_B, BL*.5).addScaledVector(BLADE_H, .016);
+PUCK_ON.z = .006 + .0381 + curveAt(BL*.5);
+
+function newRig(){
+  const R = { M: [...Array(NB)].map(() => new T3.Matrix4()), side: 1 };
+  for(const k of ['pP', 'pS', 'pC', 'pN', 'pH', 'X', 'Y', 'Z', 'blade', 'G', 'W', 'Wf', 'el', 'w2', 'hX', 'hY', 'hZ', 'pole', 'tmp', 'tmp2', 'o']) R[k] = V();
+  for(const k of ['qP', 'qS', 'qC', 'qN', 'qH', 'qF']) R[k] = new T3.Quaternion();
+  R.hip = [V(), V()]; R.knee = [V(), V()]; R.ank = [V(), V()]; R.sho = [V(), V()];
+  return R;
+}
+const ZERO = new T3.Matrix4().makeScale(0, 0, 0);
+/* the pose (already mirrored for his hand) into bone matrices */
+function solve(R, Pz){
+  const M = R.M;
+  /* the trunk: the pelvis takes some of the lean, the spine more, the chest all of it */
+  _e.set(Pz.lean*.45, Pz.hipYaw, Pz.hipRoll, 'YXZ'); R.qP.setFromEuler(_e); R.pP.set(Pz.px, Pz.py, Pz.pz);
+  _e.set(Pz.lean*.75, (Pz.hipYaw + Pz.twist)*.5, Pz.roll*.5, 'YXZ'); R.qS.setFromEuler(_e);
+  R.pS.copy(SPI).applyQuaternion(R.qP).add(R.pP);
+  _e.set(Pz.lean, Pz.twist, Pz.roll, 'YXZ'); R.qC.setFromEuler(_e);
+  R.pC.copy(CHE).applyQuaternion(R.qS).add(R.pS);
+  _e.set(-Pz.lean*.4 + Pz.look*.4, Pz.headYaw*.4, 0, 'YXZ'); R.qN.copy(R.qC).multiply(_q.setFromEuler(_e));
+  R.pN.copy(NEK).applyQuaternion(R.qC).add(R.pC);
+  _e.set(-Pz.lean*.72 + Pz.look, Pz.headYaw, 0, 'YXZ'); R.qH.copy(R.qC).multiply(_q.setFromEuler(_e));
+  R.pH.copy(HED).applyQuaternion(R.qN).add(R.pN);
+  M[B.pel].compose(R.pP, R.qP, ONE); M[B.spi].compose(R.pS, R.qS, ONE); M[B.che].compose(R.pC, R.qC, ONE);
+  M[B.nek].compose(R.pN, R.qN, ONE); M[B.hed].compose(R.pH, R.qH, ONE);
+  /* legs: the skate set on the ice (yaw, edge, heel up), the knee over the toes */
+  for(let i = 0; i < 2; i++){
+    const s = i ? 1 : -1, f = Pz.feet[i];
+    const hip = R.hip[i].set(s*HIPX, HIPY, 0).applyQuaternion(R.qP).add(R.pP);
+    _e.set(-f.pitch, f.yaw, f.zr, 'YZX'); R.qF.setFromEuler(_e);
+    const toe = R.tmp.set(-Math.sin(f.yaw)*.15, 0, -Math.cos(f.yaw)*.15).add(f.p);
+    const ank = R.ank[i].set(0, ANK, .15).applyQuaternion(R.qF).add(toe);
+    const pole = R.pole.set(-Math.sin(f.yaw) + s*.22, 0, -Math.cos(f.yaw));
+    ik(hip, ank, TH, SN, pole, R.knee[i], R.w2);
+    const hn = R.hX.crossVectors(pole, R.tmp2.subVectors(R.w2, hip)).normalize();
+    R.Y.subVectors(R.knee[i], hip).normalize(); R.Z.crossVectors(hn, R.Y); basis(M[B.th[i]], hip, hn, R.Y, R.Z);
+    R.Y.subVectors(R.w2, R.knee[i]).normalize(); R.Z.crossVectors(hn, R.Y); basis(M[B.sh[i]], R.knee[i], hn, R.Y, R.Z);
+    M[B.ft[i]].compose(R.w2, R.qF, ONE);
+  }
+  /* the stick */
+  const m = R.side, X = R.X, Y = R.Y, Z = R.Z;
+  const Hh = R.o.copy(Pz.Hh);
+  stickFrame(Hh, Pz.Bt, m, X, Y, Z);
+  const top = m > 0 ? 1 : 0;
+  /* arms: the top hand first; if he can't reach the knob, the stick comes to him */
+  for(const i of [top, 1 - top]){
+    const s = i ? 1 : -1, isTop = i === top;
+    const sh = R.sho[i].set(s*SHO.x, SHO.y, SHO.z).applyQuaternion(R.qC).add(R.pC);
+    const pole = R.pole.set(s*.85, -.5, .32).applyQuaternion(R.qC);
+    const fa = clamp(isTop ? Pz.freeTop : Pz.free);
+    const reach = UA + FA - .004;
+    let along = isTop ? .055 : Pz.gap;
+    const G = R.G, hY = R.hY, W = R.W;
+    const grip = () => {
+      G.copy(Hh).addScaledVector(Y, SL - along);
+      hY.subVectors(G, sh); hY.addScaledVector(Y, -hY.dot(Y)); if(hY.lengthSq() < 1e-8) hY.set(0, -1, 0); hY.normalize();
+      W.copy(G).addScaledVector(hY, -GRIP);
+    };
+    grip();
+    if(fa < .999){
+      let d = W.distanceTo(sh);
+      if(d > reach){
+        if(isTop){ R.tmp.subVectors(W, sh).multiplyScalar(1 - reach/d); Hh.sub(R.tmp); grip(); }
+        else { for(let k = 0; k < 8 && d > reach; k++){ along = Math.max(.2, along - .05); grip(); d = W.distanceTo(sh); } }
+      }
+      /* the forearm comes in from the elbow, not the shoulder: solve, then turn the wrist to suit and solve again */
+      ik(sh, W, UA, FA, pole, R.el, R.w2);
+      R.tmp.subVectors(G, R.el); R.tmp.addScaledVector(Y, -R.tmp.dot(Y));
+      if(R.tmp.lengthSq() > 1e-8){ hY.lerp(R.tmp.normalize(), .55).normalize(); W.copy(G).addScaledVector(hY, -GRIP); }
+    }
+    /* a free hand: to its own spot, given from the chest */
+    if(fa > .001){ R.Wf.copy(isTop ? Pz.frTop : Pz.fr).applyQuaternion(R.qC).add(R.pC); W.lerp(R.Wf, fa); }
+    ik(sh, W, UA, FA, pole, R.el, R.w2);
+    const hn = R.hZ.crossVectors(pole, R.tmp2.subVectors(R.w2, sh)).normalize();
+    const Ya = R.tmp.subVectors(R.el, sh).normalize(); basis(M[B.ua[i]], sh, hn, Ya, R.hX.crossVectors(hn, Ya));
+    Ya.subVectors(R.w2, R.el).normalize(); basis(M[B.fa[i]], R.el, hn, Ya, R.hX.crossVectors(hn, Ya));
+    /* the glove: X along the shaft towards the blade (where the thumb points), Y from the wrist into the fist */
+    const hx = R.hX.copy(Y).negate();
+    if(fa > .001){
+      const fy = R.tmp2.copy(Ya);
+      hY.lerp(fy, fa).normalize();
+      _m.makeRotationFromQuaternion(R.qC); const fx = R.Wf.set(0, 0, -1).applyMatrix4(_m);
+      hx.lerp(fx.addScaledVector(hY, -fx.dot(hY)).normalize(), fa);
+    }
+    hx.addScaledVector(hY, -hx.dot(hY)).normalize();
+    const hz = R.hZ.crossVectors(hx, hY);
+    const at = R.tmp.copy(R.w2).addScaledVector(hY, GRIP);
+    basis(M[B.hd[i]], at, hx, hY, hz);
+  }
+  /* the stick bone: this hand's stick, the other one folded away */
+  basis(M[B.stk[m > 0 ? 0 : 1]], Hh, X, Y, Z); M[B.stk[m > 0 ? 1 : 0]].copy(ZERO);
+  if(Pz.noStick){ M[B.stk[0]].copy(ZERO); M[B.stk[1]].copy(ZERO); }
+  R.blade.copy(Hh).addScaledVector(X, PUCK_ON.x).addScaledVector(Y, PUCK_ON.y).addScaledVector(Z, m*PUCK_ON.z);
+  R.heel = Hh;
+  return R;
+}
+
+/* ===================================== THE GEOMETRY =====================================
+   Every vertex carries up to four bones. Tubes are lofted ring by ring in a bone's own
+   space and blend into the next bone near a joint; small rigid parts ride one bone. */
+const ATL = 1024;
+const rect = (x0, y0, w, h) => (u, v) => [(x0 + .75 + clamp(u)*(w - 1.5))/ATL, 1 - (y0 + .75 + (1 - clamp(v))*(h - 1.5))/ATL];
+const R_TORSO = rect(0, 0, 1024, 512), R_UPPER = rect(0, 512, 512, 256), R_FORE = rect(512, 512, 512, 256);
+const R_LEG = rect(0, 768, 128, 256), R_WAIST = rect(128, 768, 128, 256), R_SOCK = rect(256, 768, 128, 256);
+const R_FACE = rect(384, 768, 256, 256), R_HELM = rect(896, 768, 128, 128);
+const swPos = i => i < 16 ? [640 + (i % 4)*64, 768 + Math.floor(i/4)*64] : [896 + ((i - 16) % 2)*64, 896 + Math.floor((i - 16)/2)*64];
+const SW = { helm: 0, helmD: 1, glove: 2, cuff: 3, palm: 4, skin: 5, boot: 6, bootA: 7, holder: 8, steel: 9, shaft: 10, knob: 11, tape: 12, strap: 13, collar: 14, tongue: 15, lace: 16, hair: 17, accent: 18, rivet: 19 };
+const swUV = i => { const [x, y] = swPos(i); return [(x + 32)/ATL, 1 - (y + 32)/ATL]; };
+
+function Acc(){ return { p: [], n: [], uv: [], si: [], sw: [], ib: [], iv: [] }; }
+function normW(W){
+  const w = W.filter(x => x[1] > 1e-4).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  let t = 0; for(const x of w) t += x[1];
+  const o = w.map(x => [x[0], x[1]/(t || 1)]); while(o.length < 4) o.push([0, 0]);
+  return o;
+}
+function vert(A, p, n, uv, W){
+  A.p.push(p.x, p.y, p.z); A.n.push(n.x, n.y, n.z); A.uv.push(uv[0], uv[1]);
+  const w = normW(W); for(let k = 0; k < 4; k++){ A.si.push(w[k][0]); A.sw.push(w[k][1]); }
+  return A.p.length/3 - 1;
+}
+/* a loft: rings = [{ y, rx, rz, cx, cz, n }] in the bone's space (y along it), seg round.
+   o.M bone space -> bind space, o.th0 where u = 0 sits, o.uv(fu, fa, i, r) the atlas, fa the
+   fraction of the way round by arc length, o.w(lx, ly, lz, i, fu) the bones. */
+function tube(A, rings, o){
+  const seg = o.seg, nr = rings.length, Mx = o.M, grp = o.grp || 0, part = o.arc || 1, closed = part >= 1;
+  const pts = [], loc = [], fa = [];
+  for(let i = 0; i < nr; i++){
+    const r = rings[i], e = 2/(r.n || 2), row = [], lrow = [], arc = [0];
+    for(let j = 0; j <= seg; j++){
+      const th = o.th0 + (j/seg)*TAU*part, s = Math.sin(th), c = Math.cos(th);
+      let lx = (r.cx || 0) + r.rx*Math.sign(s)*Math.pow(Math.abs(s), e), lz = (r.cz || 0) + r.rz*Math.sign(c)*Math.pow(Math.abs(c), e);
+      if(o.shape){ const q = o.shape(lx, r.y, lz, th, i); lx = q[0]; lz = q[1]; }
+      const lp = V(lx, r.y, lz); lrow.push(lp); row.push(lp.clone().applyMatrix4(Mx));
+      if(j) arc.push(arc[j - 1] + Math.hypot(lx - lrow[j - 1].x, lz - lrow[j - 1].z));
+    }
+    const tot = arc[seg] || 1; fa.push(arc.map(a => a/tot)); pts.push(row); loc.push(lrow);
+  }
+  const det = Mx.determinant(), flip = det < 0;
+  const idx = [];
+  const tA = V(), tB = V(), nn = V();
+  for(let i = 0; i < nr; i++){
+    const row = [];
+    for(let j = 0; j <= seg; j++){
+      const jm = closed ? (j === 0 ? seg - 1 : j - 1) : Math.max(0, j - 1), jp = closed ? (j === seg ? 1 : j + 1) : Math.min(seg, j + 1);
+      tA.subVectors(pts[i][jp], pts[i][jm]);
+      const i0 = Math.max(0, i - 1), i1 = Math.min(nr - 1, i + 1);
+      tB.subVectors(pts[i1][j], pts[i0][j]);
+      nn.crossVectors(tA, tB); if(flip) nn.negate(); if(nn.lengthSq() < 1e-14) nn.set(0, 1, 0); nn.normalize();
+      const l = loc[i][j], fu = j/seg;
+      row.push(vert(A, pts[i][j], nn, o.uv(fu, fa[i][j], i, rings[i]), o.w(l.x, l.y, l.z, i, fu)));
+    }
+    idx.push(row);
+  }
+  const out = grp ? A.iv : A.ib;
+  for(let i = 0; i < nr - 1; i++) for(let j = 0; j < seg; j++){
+    const a = idx[i][j], b = idx[i][j + 1], c = idx[i + 1][j + 1], d = idx[i + 1][j];
+    if(flip) out.push(a, c, b, a, d, c); else out.push(a, b, c, a, c, d);
+  }
+  /* caps: a fan, facing out along the bone */
+  const cap = (i, dir) => {
+    const r = rings[i], cen = V(r.cx || 0, r.y, r.cz || 0).applyMatrix4(Mx), ax = V(0, dir, 0).transformDirection(Mx);
+    const c0 = vert(A, cen, ax, o.uv(.5, .5, i, r), o.w(r.cx || 0, r.y, r.cz || 0, i, .5));
+    const ring = []; for(let j = 0; j <= seg; j++){ const l = loc[i][j]; ring.push(vert(A, pts[i][j], ax, o.uv(j/seg, fa[i][j], i, r), o.w(l.x, l.y, l.z, i, j/seg))); }
+    for(let j = 0; j < seg; j++){
+      const p0 = cen, p1 = pts[i][j], p2 = pts[i][j + 1];
+      const nrm = V().subVectors(p1, p0).cross(V().subVectors(p2, p0));
+      if(nrm.dot(ax) >= 0) out.push(c0, ring[j], ring[j + 1]); else out.push(c0, ring[j + 1], ring[j]);
+    }
+  };
+  if(o.cap0) cap(0, -1); if(o.cap1) cap(nr - 1, 1);
+}
+/* a rigid part: any three.js geometry, in bone space by Ml, coloured by a swatch or mapped by uvf */
+function part(A, geo, bone, Mb, Ml, uvf, grp = 0){
+  const g = geo.index ? geo : geo;
+  const pos = g.attributes.position, nor = g.attributes.normal, uv0 = g.attributes.uv;
+  const Mx = new T3.Matrix4().multiplyMatrices(Mb, Ml), Nm = new T3.Matrix3().getNormalMatrix(Mx), flip = Mx.determinant() < 0;
+  const base = [], p = V(), n = V();
+  for(let k = 0; k < pos.count; k++){
+    p.fromBufferAttribute(pos, k).applyMatrix4(Mx); n.fromBufferAttribute(nor, k).applyMatrix3(Nm).normalize();
+    const uv = typeof uvf === 'function' ? uvf(uv0 ? uv0.getX(k) : 0, uv0 ? uv0.getY(k) : 0) : uvf;
+    base.push(vert(A, p, n, uv, [[bone, 1]]));
+  }
+  const out = grp ? A.iv : A.ib;
+  const tri = (a, b, c) => flip ? out.push(base[a], base[c], base[b]) : out.push(base[a], base[b], base[c]);
+  if(g.index){ const ix = g.index.array; for(let k = 0; k < ix.length; k += 3) tri(ix[k], ix[k + 1], ix[k + 2]); }
+  else for(let k = 0; k < pos.count; k += 3) tri(k, k + 1, k + 2);
+}
+/* a rounded box (superellipsoid), half sizes hx, hy, hz */
+function blob(hx, hy, hz, n = 3, ws = 12, hs = 8){
+  const g = new T3.SphereGeometry(1, ws, hs), p = g.attributes.position, e = 2/n;
+  for(let k = 0; k < p.count; k++){
+    const x = p.getX(k), y = p.getY(k), z = p.getZ(k);
+    p.setXYZ(k, Math.sign(x)*Math.pow(Math.abs(x), e)*hx, Math.sign(y)*Math.pow(Math.abs(y), e)*hy, Math.sign(z)*Math.pow(Math.abs(z), e)*hz);
+  }
+  g.computeVertexNormals(); return g;
+}
+const mat4 = (x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) => new T3.Matrix4().compose(V(x, y, z), new T3.Quaternion().setFromEuler(new T3.Euler(rx, ry, rz)), V(sx, sy, sz));
+/* Catmull-Rom through a column of numbers, k steps per span */
+function spline(ctrl, k){
+  const out = [], n = ctrl.length;
+  for(let i = 0; i < n - 1; i++) for(let s = 0; s < (i === n - 2 ? k + 1 : k); s++){
+    const t = s/k, p0 = ctrl[Math.max(0, i - 1)], p1 = ctrl[i], p2 = ctrl[i + 1], p3 = ctrl[Math.min(n - 1, i + 2)];
+    const r = {};
+    for(const key of Object.keys(p1)){ const a = p0[key], b = p1[key], c = p2[key], d = p3[key]; r[key] = .5*(2*b + (-a + c)*t + (2*a - 5*b + 4*c - d)*t*t + (-a + 3*b - 3*c + d)*t*t*t); }
+    out.push(r);
+  }
+  return out;
+}
+
+/* the bind pose: standing straight, arms hanging a little out (an A) */
+function bindPose(){
+  const Pz = basePose();
+  Pz.py = PY0; Pz.lean = 0; Pz.feet[0].p.set(-HIPX, 0, 0); Pz.feet[1].p.set(HIPX, 0, 0); Pz.feet[0].yaw = Pz.feet[1].yaw = 0;
+  Pz.free = Pz.freeTop = 1;
+  const dir = s => V(s*.36, -1, -.1).normalize().multiplyScalar(UA + FA - .02);
+  Pz.fr.copy(SHO).setX(-SHO.x).add(dir(-1)); Pz.frTop.copy(SHO).add(dir(1));
+  Pz.Hh.set(-.4, 0, -.8); Pz.Bt.set(.1, .9, -.1);
+  return Pz;
+}
+
+let GEO = null, BIND = null, INV = null;
+function buildAll(){
+  const R = newRig(); R.side = 1;
+  solve(R, bindPose());
+  BIND = R.M.map(m => m.clone()); BIND[B.stk[0]].identity(); BIND[B.stk[1]].identity();
+  INV = BIND.map(m => m.clone().invert());
+  GEO = { hi: build(BIND, 1), lo: build(BIND, 0) };
+}
+
+function build(Mb, hi){
+  const A = Acc();
+  const S = hi ? 1 : .42, seg = n => Math.max(5, Math.round(n*S));
+  const inv = Mb.map(m => m.clone().invert());
+  /* a world direction in a bone's bind space */
+  const dirIn = (bone, d) => d.clone().transformDirection(inv[bone]);
+  const thOf = (bone, d) => { const l = dirIn(bone, d); return Math.atan2(l.x, l.z); };
+
+  /* ---------------- the sweater: a loose lathe over the shoulder pads, hem over the pants ---------------- */
+  const torsoCtrl = [
+    { y: -.235, a: .228, b: .162, cz: .004, n: 2.2 },
+    { y: -.242, a: .246, b: .18, cz: .006, n: 2.2 },
+    { y: -.17, a: .243, b: .176, cz: .004, n: 2.2 },
+    { y: -.07, a: .232, b: .166, cz: .002, n: 2.3 },
+    { y: .04, a: .219, b: .154, cz: -.004, n: 2.4 },
+    { y: .15, a: .226, b: .157, cz: -.008, n: 2.5 },
+    { y: .26, a: .248, b: .166, cz: -.011, n: 2.6 },
+    { y: .35, a: .270, b: .170, cz: -.010, n: 2.8 },
+    { y: .42, a: .281, b: .166, cz: -.006, n: 3.0 },
+    { y: .475, a: .272, b: .154, cz: -.002, n: 2.9 },
+    { y: .52, a: .233, b: .135, cz: .003, n: 2.5 },
+    { y: .555, a: .165, b: .110, cz: .006, n: 2.2 },
+    { y: .577, a: .104, b: .087, cz: .008, n: 2 },
+    { y: .588, a: .076, b: .071, cz: .01, n: 2 }
+  ];
+  const tr = spline(torsoCtrl, hi ? 2 : 1).map(r => ({ y: r.y, rx: r.a, rz: r.b, cz: r.cz, n: r.n }));
+  /* v: cloth from the hem, so the sweater's own centimetres (hem stripes, name, number, yoke) land where kits.js says */
+  const backArc = [0]; for(let i = 1; i < tr.length; i++) backArc.push(backArc[i - 1] + Math.hypot(tr[i].y - tr[i - 1].y, (tr[i].rz + tr[i].cz) - (tr[i - 1].rz + tr[i - 1].cz)));
+  const iSh = tr.reduce((bi, r, i) => Math.abs(r.y - .43) < Math.abs(tr[bi].y - .43) ? i : bi, 0);
+  const hemI = tr.reduce((bi, r, i) => r.y < tr[bi].y ? i : bi, 0), cmAt = i => i <= hemI ? 0 : i <= iSh ? (backArc[i] - backArc[hemI])/(backArc[iSh] - backArc[hemI])*C.SHOULDER_CM : C.SHOULDER_CM + (backArc[i] - backArc[iSh])/(backArc[tr.length - 1] - backArc[iSh])*(C.PROF.total - C.SHOULDER_CM);
+  /* u: round the body by arc length, the back and chest panels given more of the cloth so the number keeps its shape */
+  const panel = f => f - .21/(4*PI)*Math.sin(4*PI*(f - .25));
+  tube(A, tr, { seg: seg(36), M: Mb[B.pel], th0: PI/2,
+    uv: (fu, fa, i) => R_TORSO(panel(fa), cmAt(i)/C.PROF.total),
+    w: (x, y, z) => {
+      const W = []; const sp = sst(-.06, .09, y), ch = sst(.1, .26, y);
+      W.push([B.pel, (1 - sp)], [B.spi, sp*(1 - ch)], [B.che, ch]);
+      /* the hem drapes over the thighs: in a crouch they push the front of the sweater up and out */
+      const f = sst(.03, -.2, y), wl = f*(.22 + .38*clamp(-z/.12));
+      const wL = wl*clamp(.5 - x/.16), wR = wl*clamp(.5 + x/.16);
+      if(wl > 0){ for(const w of W) w[1] *= 1 - wL - wR; W.push([B.th[0], wL], [B.th[1], wR]); }
+      return W;
+    } });
+  /* collar */
+  part(A, new T3.TorusGeometry(.073, .0075, 5, seg(24)), B.che, Mb[B.pel], mat4(0, .586, .01, PI/2, 0, 0, 1, .95, .7), swUV(SW.collar));
+
+  /* ---------------- neck and head ---------------- */
+  const hd = Mb[B.hed], nk = Mb[B.nek];
+  tube(A, [{ y: -.03, rx: .06, rz: .058 }, { y: .04, rx: .057, rz: .055 }, { y: .1, rx: .056, rz: .054 }, { y: .16, rx: .055, rz: .054 }], { seg: seg(12), M: nk, th0: PI/2,
+    uv: () => swUV(SW.skin), w: (x, y) => y < .05 ? [[B.che, sst(.05, -.03, y)], [B.nek, 1 - sst(.05, -.03, y)]] : [[B.nek, 1 - sst(.08, .15, y)], [B.hed, sst(.08, .15, y)]] });
+  const headCtrl = [
+    { y: -.032, a: .018, b: .022, cz: -.052 }, { y: -.026, a: .036, b: .04, cz: -.05 }, { y: -.01, a: .054, b: .058, cz: -.043 },
+    { y: .012, a: .066, b: .078, cz: -.031 }, { y: .04, a: .073, b: .094, cz: -.022 }, { y: .072, a: .077, b: .101, cz: -.017 },
+    { y: .105, a: .078, b: .104, cz: -.017 }, { y: .14, a: .074, b: .1, cz: -.019 }, { y: .175, a: .06, b: .085, cz: -.02 },
+    { y: .2, a: .034, b: .055, cz: -.02 }, { y: .209, a: .004, b: .006, cz: -.02 }
+  ];
+  const hr = spline(headCtrl, hi ? 3 : 1).map(r => ({ y: r.y, rx: r.a, rz: r.b, cz: r.cz, n: 2.15 }));
+  const hY0 = -.032, hY1 = .209;
+  /* two halves: the front is the face, painted; the back is hair under the helmet */
+  for(const front of [true, false]){
+    tube(A, hr, { seg: front ? (hi ? 18 : 6) : (hi ? 8 : 4), arc: .5, M: hd, th0: front ? PI/2 : 3*PI/2,
+      shape: (lx, ly, lz, th) => {
+        /* the face: flatter across the cheeks, a nose, the brow over set-in eyes, cheekbones, a chin */
+        const fr = Math.max(0, -Math.cos(th)), da = th - PI, g = (x, w) => Math.exp(-(x/w)*(x/w));
+        let dz = 0;
+        dz -= .019*g(da, .13)*g(ly - .05, .02)*(ly < .05 ? 1 : 1) + .008*g(da, .1)*g(ly - .075, .018);
+        dz -= .007*g(da, .55)*g(ly - .097, .011);
+        dz += .006*(g(da - .4, .16) + g(da + .4, .16))*g(ly - .078, .012);
+        dz -= .004*(g(da - .62, .2) + g(da + .62, .2))*g(ly - .055, .02);
+        dz -= .006*g(da, .3)*g(ly + .02, .012);
+        return [lx*(1 - .07*fr), lz + dz];
+      },
+      uv: (fu, fa, i, r) => front ? R_FACE(fu, (r.y - hY0)/(hY1 - hY0)) : swUV(SW.hair),
+      w: () => [[B.hed, 1]] });
+  }
+  /* ---------------- the helmet: shell, rim, ear guards, visor, chin strap ---------------- */
+  const hc = V(0, .093, -.016), HA = .1, HB = .131, HC = .124;
+  const rimY = th => .07 - .045*Math.cos(th) + .006*Math.cos(2*th);
+  const helmRings = [];
+  const nH = hi ? 9 : 5;
+  for(let i = 0; i <= nH; i++) helmRings.push({ y: i, rx: 1, rz: 1 });
+  tube(A, helmRings, { seg: seg(32), M: hd, th0: PI/2,
+    shape: (lx, ly, lz, th) => {
+      /* from the rim (y from rimY) up to the crown, round an egg a little longer at the back */
+      const t = ly/nH, y0 = rimY(th) - hc.y, phi0 = Math.asin(clamp(y0/HB, -1, 1)), phi = lerp(phi0, PI/2, t);
+      const cs = Math.cos(phi), back = Math.max(0, Math.cos(th));
+      return [Math.sin(th)*HA*cs*(1 + .04*back), hc.z + Math.cos(th)*(HC + .012*back)*cs];
+    },
+    uv: (fu, fa, i) => R_HELM(fu, i/nH),
+    w: () => [[B.hed, 1]] });
+  /* y for the helmet rings is filled in after the shape: redo the positions with the true heights */
+  fixHelmet(A, hd, helmRings.length, seg(32), nH, rimY, hc, HB);
+  /* the rim: a rubber lip, turned under */
+  const rimRings = [{ y: 0, rx: 1.0, rz: 1.0 }, { y: 1, rx: .93, rz: .93 }];
+  tube(A, rimRings, { seg: seg(32), M: hd, th0: PI/2,
+    shape: (lx, ly, lz, th) => { const y0 = rimY(th) - hc.y, phi = Math.asin(clamp(y0/HB, -1, 1)), cs = Math.cos(phi), back = Math.max(0, Math.cos(th)), k = ly ? .935 : 1.0;
+      return [Math.sin(th)*HA*cs*(1 + .04*back)*k, hc.z + Math.cos(th)*(HC + .012*back)*cs*k]; },
+    uv: () => swUV(SW.helmD), w: () => [[B.hed, 1]] });
+  fixRim(A, hd, seg(32), rimY, hc);
+  if(hi){
+    /* ear guards and the clips that hold the visor */
+    for(const s of [-1, 1]){
+      part(A, blob(.016, .036, .034, 2.4, 10, 8), B.hed, hd, mat4(s*.096, .052, -.004, 0, 0, s*.08), swUV(SW.helm));
+      part(A, blob(.006, .012, .012, 2, 6, 5), B.hed, hd, mat4(s*.102, .1, -.07), swUV(SW.helmD));
+    }
+    /* chin strap */
+    const strap = new T3.CatmullRomCurve3([V(-.09, .03, -.01), V(-.07, -.01, -.035), V(-.03, -.036, -.058), V(0, -.04, -.062), V(.03, -.036, -.058), V(.07, -.01, -.035), V(.09, .03, -.01)]);
+    part(A, new T3.TubeGeometry(strap, 14, .0045, 4, false), B.hed, hd, new T3.Matrix4(), swUV(SW.strap));
+    /* the visor: clear, from the brow to the tip of the nose, wrapped round */
+    const vis = [];
+    for(let i = 0; i <= 1; i++) vis.push({ y: lerp(.032, .118, i), rx: 1, rz: 1 });
+    const vg = new T3.BufferGeometry(), vp = [], vn = [], vu = [], vi = [], N = 16;
+    for(let i = 0; i <= 1; i++) for(let j = 0; j <= N; j++){
+      const th = lerp(PI - 1.32, PI + 1.32, j/N), y = lerp(.03, .118, i), out = 1 + .07*(1 - i);
+      const x = Math.sin(th)*(HA + .012)*out, z = hc.z + Math.cos(th)*(HC + .006)*out;
+      vp.push(x, y, z); vn.push(Math.sin(th), .1*(1 - i), Math.cos(th)); vu.push(j/N, i);
+    }
+    for(let j = 0; j < N; j++){ const a = j, b = j + 1, c = N + 2 + j, d = N + 1 + j; vi.push(a, c, b, a, d, c); }
+    vg.setAttribute('position', new T3.Float32BufferAttribute(vp, 3)); vg.setAttribute('normal', new T3.Float32BufferAttribute(vn, 3)); vg.setAttribute('uv', new T3.Float32BufferAttribute(vu, 2)); vg.setIndex(vi);
+    part(A, vg, B.hed, hd, new T3.Matrix4(), swUV(SW.helm), 1);
+    /* the visor's lower edge trim */
+    const edge = new T3.CatmullRomCurve3([...Array(9)].map((_, j) => { const th = lerp(PI - 1.3, PI + 1.3, j/8); return V(Math.sin(th)*(HA + .012)*1.07, .031, hc.z + Math.cos(th)*(HC + .006)*1.07); }));
+    part(A, new T3.TubeGeometry(edge, 16, .0022, 3, false), B.hed, hd, new T3.Matrix4(), swUV(SW.helmD));
+  }
+
+  /* ---------------- arms: sleeves over shoulder caps and elbow pads ---------------- */
+  for(let i = 0; i < 2; i++){
+    const s = i ? 1 : -1, bu = B.ua[i], bf = B.fa[i];
+    const thU = thOf(bu, V(s, 0, 0)) - PI/2, thF = thOf(bf, V(s, 0, 0)) - PI/2;
+    const up = spline([
+      { y: -.095, r: .014 }, { y: -.082, r: .062 }, { y: -.055, r: .094 }, { y: -.015, r: .103 }, { y: .035, r: .097 }, { y: .1, r: .086 },
+      { y: .18, r: .079 }, { y: .245, r: .078 }, { y: .29, r: .083 }, { y: .318, r: .085 }, { y: .345, r: .078 }
+    ], hi ? 2 : 1).map(r => ({ y: r.y, rx: r.r, rz: r.r*.97 }));
+    tube(A, up, { seg: seg(18), M: Mb[bu], th0: thU,
+      uv: (fu, fa, k, r) => R_UPPER(fu, clamp(r.y/.33)),
+      w: (x, y) => { const c = .55*sst(.0, -.085, y), e = .5*sst(.27, .345, y); return [[B.che, c], [bu, 1 - c - e], [bf, e]]; } });
+    const fo = spline([
+      { y: -.045, r: .074 }, { y: -.012, r: .086 }, { y: .02, r: .087 }, { y: .06, r: .08 }, { y: .12, r: .073 }, { y: .2, r: .066 }, { y: .24, r: .064 }, { y: .262, r: .063 }
+    ], hi ? 2 : 1).map(r => ({ y: r.y, rx: r.r, rz: r.r*.95 }));
+    tube(A, fo, { seg: seg(16), M: Mb[bf], th0: thF,
+      uv: (fu, fa, k, r) => R_FORE(fu, 1 - (FA - r.y)/.34),
+      w: (x, y) => { const e = .5*sst(.03, -.04, y); return [[bu, e], [bf, 1 - e]]; } });
+  }
+  /* ---------------- gloves: fist round the shaft, finger rolls, thumb, gauntlet ---------------- */
+  for(let i = 0; i < 2; i++){
+    const bh = B.hd[i], Mh = Mb[bh], mz = i ? 1 : -1;   /* the left glove is the right one mirrored */
+    const GS = 1.2, L = (x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) => new T3.Matrix4().makeScale(GS, GS, GS*mz).multiply(mat4(x, y, z, rx, ry, rz, sx, sy, sz));
+    const CM = new T3.Matrix4().multiplyMatrices(Mh, new T3.Matrix4().makeScale(1, 1, mz));
+    if(hi){
+      part(A, blob(.05, .042, .043, 3.2, 10, 7), bh, Mh, L(0, -.006, -.006), swUV(SW.glove));
+      for(let f = 0; f < 4; f++){
+        const x = -.04 + f*.0265, r = .035 - (f === 0 ? .004 : 0);
+        part(A, new T3.TorusGeometry(r, .0142, 5, 8, 3.35), bh, Mh, L(x, 0, 0, 0, PI/2, 0).multiply(mat4(0, 0, 0, 0, 0, -.25)), swUV(SW.glove));
+      }
+      part(A, blob(.052, .042, .021, 3, 8, 6), bh, Mh, L(0, -.045, -.035, .12), swUV(SW.glove));
+      part(A, blob(.048, .012, .006, 2.6, 8, 6), bh, Mh, L(0, -.04, -.056, .12), swUV(SW.cuff));
+      part(A, blob(.034, .017, .018, 2.4, 8, 6), bh, Mh, L(.062, -.012, .026, 0, .15, .35), swUV(SW.glove));
+    } else part(A, blob(.06, .055, .05, 3, 8, 6), bh, Mh, L(0, -.02, 0), swUV(SW.glove));
+    /* the gauntlet rides the forearm (the wrist bends inside it): wide and open over the end of the sleeve,
+       a band of the glove's colour at the top, its end tucked into the fist */
+    const bf = B.fa[i], Mf = Mb[bf], cw = (x, y) => { const h = .55*sst(FA - .03, FA + .04, y); return [[bf, 1 - h], [bh, h]]; };
+    tube(A, [{ y: FA - .128, rx: .072, rz: .07 }, { y: FA - .14, rx: .083, rz: .08 }, { y: FA - .132, rx: .088, rz: .085 }], { seg: seg(16), M: Mf, th0: 0, uv: () => swUV(SW.cuff), w: cw });
+    tube(A, [{ y: FA - .132, rx: .088, rz: .085 }, { y: FA - .1, rx: .085, rz: .082 }], { seg: seg(16), M: Mf, th0: 0, uv: () => swUV(SW.glove), w: cw });
+    tube(A, [{ y: FA - .1, rx: .085, rz: .082 }, { y: FA - .05, rx: .078, rz: .075 }, { y: FA - .005, rx: .07, rz: .067 }, { y: FA + .03, rx: .062, rz: .06 }, { y: FA + .045, rx: .05, rz: .048 }], { seg: seg(16), M: Mf, th0: 0, uv: () => swUV(SW.cuff), w: cw });
+  }
+
+  /* ---------------- hockey pants: a shell round the seat, two wide legs ---------------- */
+  tube(A, spline([
+    { y: .04, a: .2, b: .136, cz: .0 }, { y: -.03, a: .212, b: .145, cz: .004 }, { y: -.1, a: .218, b: .15, cz: .006 },
+    { y: -.17, a: .216, b: .15, cz: .008 }, { y: -.215, a: .19, b: .135, cz: .008 }, { y: -.228, a: .03, b: .03, cz: .008 }
+  ], hi ? 2 : 1).map(r => ({ y: r.y, rx: r.a, rz: r.b, cz: r.cz, n: 2.3 })).reverse(), { seg: seg(30), M: Mb[B.pel], th0: PI/2,
+    uv: (fu, fa, i, r) => R_WAIST(fa, (r.y + .228)/.268),
+    w: (x, y) => { const l = .35*sst(-.08, -.2, y)*clamp(Math.abs(x)/.08); return [[B.pel, 1 - l], [B.th[x < 0 ? 0 : 1], l]]; } });
+  for(let i = 0; i < 2; i++){
+    const s = i ? 1 : -1, bt = B.th[i], th0 = thOf(bt, V(s, 0, 0)) - PI/2, out = dirIn(bt, V(s, 0, 0)), fw = dirIn(bt, V(0, 0, -1));
+    const legR = spline([
+      { y: -.11, r: .1, o: .0 }, { y: -.05, r: .12, o: .006 }, { y: .02, r: .142, o: .014 }, { y: .1, r: .139, o: .017 }, { y: .18, r: .134, o: .017 },
+      { y: .25, r: .129, o: .015 }, { y: .315, r: .126, o: .014 }, { y: .328, r: .119, o: .014 }, { y: .316, r: .11, o: .014 }
+    ], hi ? 2 : 1);
+    tube(A, legR.map(r => ({ y: r.y, rx: r.r, rz: r.r*1.04, cx: out.x*r.o + fw.x*.008, cz: out.z*r.o + fw.z*.008, n: 2.9 })), { seg: seg(22), M: Mb[bt], th0,
+      uv: (fu, fa, k, r) => R_LEG(fu, 1 - (r.y + .11)/.44),
+      w: (x, y) => { const p = .8*sst(.07, -.11, y); return [[B.pel, p], [bt, 1 - p]]; } });
+  }
+  /* ---------------- socks over shin guards: the kneecap forward, the shin's ridge ---------------- */
+  for(let i = 0; i < 2; i++){
+    const bs = B.sh[i], fw = dirIn(bs, V(0, 0, -1));
+    const sk = spline([
+      { y: -.18, r: .082, f: .0, d: 1 }, { y: -.1, r: .084, f: .0, d: 1 }, { y: -.05, r: .087, f: .007, d: 1.04 }, { y: -.01, r: .086, f: .018, d: 1.1 }, { y: .03, r: .08, f: .018, d: 1.12 },
+      { y: .09, r: .071, f: .014, d: 1.11 }, { y: .18, r: .066, f: .012, d: 1.09 }, { y: .28, r: .061, f: .009, d: 1.07 }, { y: .36, r: .056, f: .005, d: 1.04 },
+      { y: .43, r: .05, f: .0, d: 1 }
+    ], hi ? 2 : 1);
+    tube(A, sk.map(r => ({ y: r.y, rx: r.r, rz: r.r*r.d, cx: fw.x*r.f, cz: fw.z*r.f, n: 2.2 })), { seg: seg(18), M: Mb[bs], th0: thOf(bs, V(i ? 1 : -1, 0, 0)) - PI/2,
+      uv: (fu, fa, k, r) => R_SOCK(fu, (.43 - r.y)/.61),
+      w: (x, y) => { const t = sst(.03, -.07, y); return [[B.th[i], t], [bs, 1 - t]]; } });
+  }
+  /* ---------------- skates: boot, tongue, tendon guard, holder, steel ---------------- */
+  for(let i = 0; i < 2; i++){
+    const bf = B.ft[i], Mf = Mb[bf];
+    const boot = [
+      { y: -.062, w: .044, f: .148, b: .092, n: 2.7 }, { y: -.05, w: .049, f: .153, b: .097, n: 2.7 }, { y: -.03, w: .05, f: .151, b: .098, n: 2.6 },
+      { y: -.012, w: .049, f: .138, b: .095, n: 2.5 }, { y: .004, w: .047, f: .11, b: .091, n: 2.35 }, { y: .02, w: .045, f: .083, b: .087, n: 2.2 },
+      { y: .04, w: .045, f: .068, b: .085, n: 2.2 }, { y: .06, w: .047, f: .063, b: .083, n: 2.2 }, { y: .076, w: .05, f: .064, b: .085, n: 2.2 }, { y: .073, w: .046, f: .058, b: .079, n: 2.2 }
+    ];
+    const bootR = boot.map(r => ({ y: r.y, rx: r.w, rz: 1, n: r.n, f: r.f, b: r.b }));
+    tube(A, bootR, { seg: seg(24), M: Mf, th0: PI/2,
+      shape: (lx, ly, lz, th, k) => { const r = bootR[k], c = Math.cos(th), e = 2/r.n; return [lx, Math.sign(c)*Math.pow(Math.abs(c), e)*(c > 0 ? r.b : r.f) - .012]; },
+      uv: () => swUV(SW.boot), w: () => [[bf, 1]], cap0: true });
+    if(hi){
+      /* the quarter panel's trim and the toe cap */
+      tube(A, [{ y: -.004, rx: 1, rz: 1 }, { y: .008, rx: 1, rz: 1 }], { seg: seg(24), M: Mf, th0: PI/2,
+        shape: (lx, ly, lz, th) => { const r = ly < 0 ? bootR[4] : bootR[5], k = ly < 0 ? 0 : 1, c = Math.cos(th), e = 2/r.n, sc = 1.012, rb = lerp(.093, .088, k), rf = lerp(.118, .09, k);
+          return [Math.sign(Math.sin(th))*Math.pow(Math.abs(Math.sin(th)), e)*r.rx*sc, Math.sign(c)*Math.pow(Math.abs(c), e)*(c > 0 ? rb : rf)*sc - .012]; },
+        uv: () => swUV(SW.bootA), w: () => [[bf, 1]] });
+      part(A, blob(.034, .052, .009, 2.8, 8, 8), bf, Mf, mat4(0, .1, -.072, -.28), swUV(SW.tongue));
+      part(A, blob(.02, .042, .007, 2.6, 8, 8), bf, Mf, mat4(0, .1, .072, .32), swUV(SW.boot));
+      part(A, blob(.018, .004, .045, 2.6, 6, 4), bf, Mf, mat4(0, .036, -.086, -.18), swUV(SW.lace));
+    }
+    /* holder and runner, from side profiles */
+    const hs = new T3.Shape();
+    const hp = [[-.142, -.098], [.118, -.098], [.124, -.088], [.104, -.06], [.04, -.06], [.03, -.078], [-.05, -.08], [-.075, -.062], [-.13, -.06], [-.15, -.074]];
+    hs.moveTo(hp[0][0], hp[0][1]); for(const q of hp.slice(1)) hs.lineTo(q[0], q[1]);
+    const hg = new T3.ExtrudeGeometry(hs, { depth: .026, bevelEnabled: false, curveSegments: 2 });
+    part(A, hg.toNonIndexed ? hg : hg, bf, Mf, new T3.Matrix4().set(0, 0, 1, -.013, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1).premultiply(new T3.Matrix4()), swUV(SW.holder));
+    const ss = new T3.Shape(), steel = [];
+    for(let k = 0; k <= 12; k++){ const z = lerp(-.158, .138, k/12); steel.push([z, -ANK + .0036*Math.pow((z + .01)/.148, 2) + .012*Math.pow(sst(-.13, -.158, z), 1.5) + .005*sst(.12, .138, z)]); }
+    ss.moveTo(steel[0][0], steel[0][1]); for(const q of steel.slice(1)) ss.lineTo(q[0], q[1]);
+    ss.lineTo(.134, -.093); ss.lineTo(-.15, -.093); ss.closePath();
+    part(A, new T3.ExtrudeGeometry(ss, { depth: .0048, bevelEnabled: false, curveSegments: 2 }), bf, Mf, new T3.Matrix4().set(0, 0, 1, -.0024, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1), swUV(SW.steel));
+  }
+
+  /* ---------------- the sticks: a left and a right, the unused one folded to nothing ---------------- */
+  for(let v = 0; v < 2; v++){
+    const bs = B.stk[v], Ms = Mb[bs], mzS = v ? -1 : 1, Mz = new T3.Matrix4().makeScale(1, 1, mzS);
+    const shaftR = (y0, y1, wx, wz, sw, n = 4.5) => tube(A, [{ y: y0, rx: wx, rz: wz, n }, { y: y1, rx: wx, rz: wz, n }], { seg: seg(12), M: Ms, th0: 0, uv: () => swUV(sw), w: () => [[bs, 1]] });
+    tube(A, [{ y: .012, rx: .0115, rz: .0058, n: 3 }, { y: .045, rx: .0135, rz: .0085, n: 4 }, { y: .1, rx: .0148, rz: .0104, n: 4.5 }], { seg: seg(12), M: Ms, th0: 0, uv: () => swUV(SW.shaft), w: () => [[bs, 1]] });
+    shaftR(.1, .62, .0148, .0104, SW.shaft); shaftR(.62, .7, .0149, .0105, SW.accent); shaftR(.7, SL - .165, .0148, .0104, SW.shaft);
+    tube(A, [{ y: SL - .165, rx: .0158, rz: .0114, n: 3.6 }, { y: SL - .03, rx: .0158, rz: .0114, n: 3.6 }, { y: SL - .016, rx: .0185, rz: .0145, n: 3 }, { y: SL - .004, rx: .018, rz: .014, n: 3 }, { y: SL, rx: .008, rz: .006, n: 2.4 }],
+      { seg: seg(12), M: Ms, th0: 0, uv: () => swUV(SW.knob), w: () => [[bs, 1]] });
+    /* the blade: a side profile, extruded, bent round its curve and set at the lie */
+    const bs2 = new T3.Shape();
+    const prof = [[-.012, .0], [BL - .03, .0], [BL - .01, .006], [BL, .02], [BL - .002, .045], [BL - .02, .066], [BL - .06, .072], [.12, .068], [.04, .062], [-.004, .058], [-.016, .05]];
+    bs2.moveTo(prof[0][0], prof[0][1]); for(const q of prof.slice(1)) bs2.lineTo(q[0], q[1]); bs2.closePath();
+    const bg = new T3.ExtrudeGeometry(bs2, { depth: .011, bevelEnabled: false, curveSegments: 3 });
+    const bp = bg.attributes.position;
+    for(let k = 0; k < bp.count; k++){
+      const a = bp.getX(k), h = bp.getY(k), z = bp.getZ(k) - .0055, th = clamp(a/BL);
+      const q = V().addScaledVector(BLADE_B, a).addScaledVector(BLADE_H, h); q.z = (z*(1 - .35*th) + curveAt(a))*mzS;
+      bp.setXYZ(k, q.x, q.y, q.z);
+    }
+    bg.computeVertexNormals();
+    part(A, bg, bs, Ms, new T3.Matrix4(), swUV(SW.tape));
+  }
+  return finish(A);
+}
+/* the helmet's rings are lofted against a counter, then given their true heights here */
+function fixHelmet(A, Mh, nr, seg, nH, rimY, hc, HB){
+  const n = nr*(seg + 1), start = A.p.length/3 - n, inv = new T3.Matrix4().copy(Mh).invert(), p = V(), nn = V();
+  for(let i = 0; i < nr; i++) for(let j = 0; j <= seg; j++){
+    const k = start + i*(seg + 1) + j, th = PI/2 + j/seg*TAU, t = i/nH;
+    p.set(A.p[k*3], A.p[k*3 + 1], A.p[k*3 + 2]).applyMatrix4(inv);
+    const y0 = rimY(th) - hc.y, phi0 = Math.asin(clamp(y0/HB, -1, 1)), phi = lerp(phi0, PI/2, t);
+    p.y = hc.y + HB*Math.sin(phi);
+    p.applyMatrix4(Mh); A.p[k*3] = p.x; A.p[k*3 + 1] = p.y; A.p[k*3 + 2] = p.z;
+  }
+  /* normals: the egg's own */
+  for(let i = 0; i < nr; i++) for(let j = 0; j <= seg; j++){
+    const k = start + i*(seg + 1) + j;
+    p.set(A.p[k*3], A.p[k*3 + 1], A.p[k*3 + 2]).applyMatrix4(inv).sub(hc);
+    nn.set(p.x/(.1*.1), p.y/(HB*HB), p.z/(.124*.124)).normalize().transformDirection(Mh);
+    A.n[k*3] = nn.x; A.n[k*3 + 1] = nn.y; A.n[k*3 + 2] = nn.z;
+  }
+}
+function fixRim(A, Mh, seg, rimY, hc){
+  const n = 2*(seg + 1), start = A.p.length/3 - n, inv = new T3.Matrix4().copy(Mh).invert(), p = V();
+  for(let i = 0; i < 2; i++) for(let j = 0; j <= seg; j++){
+    const k = start + i*(seg + 1) + j, th = PI/2 + j/seg*TAU;
+    p.set(A.p[k*3], A.p[k*3 + 1], A.p[k*3 + 2]).applyMatrix4(inv); p.y = rimY(th) + (i ? .005 : -.002);
+    p.applyMatrix4(Mh); A.p[k*3] = p.x; A.p[k*3 + 1] = p.y; A.p[k*3 + 2] = p.z;
+  }
+}
+function finish(A){
+  const g = new T3.BufferGeometry();
+  g.setAttribute('position', new T3.Float32BufferAttribute(A.p, 3));
+  g.setAttribute('normal', new T3.Float32BufferAttribute(A.n, 3));
+  g.setAttribute('uv', new T3.Float32BufferAttribute(A.uv, 2));
+  g.setAttribute('skinIndex', new T3.Uint16BufferAttribute(A.si, 4));
+  g.setAttribute('skinWeight', new T3.Float32BufferAttribute(A.sw, 4));
+  g.setIndex(A.ib.concat(A.iv));
+  g.addGroup(0, A.ib.length, 0); if(A.iv.length) g.addGroup(A.ib.length, A.iv.length, 1);
+  g.boundingSphere = new T3.Sphere(V(0, 1.1, 0), 2.7);
+  g.boundingBox = new T3.Box3(V(-2, -.2, -2), V(2, 3.2, 2));
+  return g;
+}
+
+/* ===================================== THE ATLAS ===================================== */
+const SKINS = ['#f2c7a2', '#e2ab80', '#c98a5c', '#a2683f', '#74472a'];
+const HAIR = ['#2a1d14', '#4a3322', '#6b4a2b', '#b8904f', '#17110c', '#7a4a26'];
+const EYES = ['#4a3020', '#3b5b7a', '#5a6a3a', '#2c2018', '#6b8aa6'];
+const shade = (hex, k) => { const n = parseInt(hex.slice(1), 16); let r = n >> 16, g = n >> 8 & 255, b = n & 255; const f = c => Math.round(clamp(k > 0 ? c + (255 - c)*k : c*(1 + k), 0, 255)); return 'rgb(' + f(r) + ',' + f(g) + ',' + f(b) + ')'; };
+const hexOf = c => /^#[0-9a-f]{6}$/i.test(c || '') ? c : '#111111';
+function lookOf(name, num){
+  const h = seedOf(String(name) + '#' + num), h2 = seedOf(String(name));
+  return { skin: SKINS[h2 % SKINS.length], hair: HAIR[(h >>> 3) % HAIR.length], beard: (h >>> 6) % 4, eyes: EYES[(h >>> 9) % EYES.length],
+    tape: (h >>> 12) & 1 ? '#f2f2ee' : '#17181a', knob: (h >>> 13) % 3 ? '#f2f2ee' : '#1a1a1a', shaft: ['#16181c', '#1e2228', '#e8ebee', '#2c3036', '#16181c'][(h >>> 15) % 5],
+    accent: ['#c8202a', '#e8ebee', '#d8b23a', '#3d9bff', '#9aa3ab'][(h >>> 18) % 5], holder: (h >>> 21) & 1 ? '#eef0f2' : '#1b1c1f', boot: ['#141517', '#1c1d20', '#101113'][(h >>> 23) % 3] };
+}
+const SW_RM = [[.32, 0], [.55, 0], [.62, 0], [.66, 0], [.82, 0], [.56, 0], [.32, .05], [.28, .55], [.42, 0], [.16, 1], [.34, 0], [.95, 0], [.95, 0], [.75, 0], [.86, 0], [.92, 0], [.92, 0], [.85, 0], [.36, 0], [.3, .8]];
+let RM_TEX = null;
+function rmTex(){
+  if(RM_TEX) return RM_TEX;
+  const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d');
+  const put = (x, y, w, h, r, m) => { g.fillStyle = 'rgb(0,' + Math.round(r*255) + ',' + Math.round(m*255) + ')'; g.fillRect(x/4, y/4, w/4, h/4); };
+  put(0, 0, 1024, 768, .84, 0); put(0, 768, 256, 256, .52, 0); put(256, 768, 128, 256, .92, 0); put(384, 768, 256, 256, .58, 0); put(896, 768, 128, 128, .3, 0);
+  SW_RM.forEach((v, i) => { const [x, y] = swPos(i); put(x, y, 64, 64, v[0], v[1]); });
+  RM_TEX = new T3.CanvasTexture(c); return RM_TEX;
+}
+function noise(g, x0, y0, w, h, n, a, dark = true){
+  g.save(); g.globalAlpha = a;
+  for(let k = 0; k < n; k++){ g.fillStyle = (Math.random() < .5) === dark ? '#000' : '#fff'; g.fillRect(x0 + Math.random()*w, y0 + Math.random()*h, 1, 1); }
+  g.restore();
+}
+function paintAtlas(g, abbr, name, num, look){
+  const k = C.kitOf(abbr), crest = k.logo || abbr;
+  /* the sweater, the sleeves: the old painters, unchanged */
+  g.save(); g.beginPath(); g.rect(0, 0, 1024, 512); g.clip(); C.paintTorso(g, k, crest, name, num); g.restore();
+  clothTorso(g);
+  g.save(); g.beginPath(); g.rect(0, 512, 512, 256); g.clip(); g.translate(0, 512); g.scale(2, 2); C.paintUpper(g, k, num); g.restore();
+  g.save(); g.beginPath(); g.rect(512, 512, 512, 256); g.clip(); g.translate(512, 512); g.scale(2, 2); C.paintFore(g, k); g.restore();
+  clothArms(g);
+  paintLeg(g, k); paintWaist(g, k);
+  g.save(); g.beginPath(); g.rect(256, 768, 128, 256); g.clip(); g.translate(256, 768); g.scale(2, 2); C.paintSocks(g, k); g.restore();
+  noise(g, 256, 768, 128, 256, 2200, .06); sockShade(g);
+  paintFace(g, look); paintHelmet(g, k, num);
+  const glv = k.glv || [k.helm || k.b, k.b], helm = k.helm || k.b;
+  const sw = [helm, '#121314', glv[0], glv[1], lum(glv[0]) > .6 ? '#c9b89a' : '#3a3734', look.skin, look.boot, '#9aa3ab', look.holder, '#d3dae0', look.shaft, look.knob, look.tape, '#141414', (k.col || [k.b])[0], '#c8cbcf', '#e3e3e0', look.hair, look.accent, '#c0c6cc'];
+  sw.forEach((c, i) => { const [x, y] = swPos(i); g.fillStyle = hexOf(c); g.fillRect(x, y, 64, 64); });
+  /* tape: a little texture on the knob and blade swatches */
+  for(const i of [SW.knob, SW.tape]){ const [x, y] = swPos(i); noise(g, x, y, 64, 64, 300, .08); }
+}
+const lum = hex => { const n = parseInt(hexOf(hex).slice(1), 16); return (.299*(n >> 16) + .587*(n >> 8 & 255) + .114*(n & 255))/255; };
+/* soft shading baked into the cloth: under the arms, the hem, the folds at the waist */
+function clothTorso(g){
+  g.save();
+  for(const u of [0, .5, 1]){
+    const gr = g.createLinearGradient(u*1024 - 90, 0, u*1024 + 90, 0); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(.5, 'rgba(0,0,0,.16)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(u*1024 - 90, 0, 180, 300);
+  }
+  const hem = g.createLinearGradient(0, 512, 0, 470); hem.addColorStop(0, 'rgba(0,0,0,.28)'); hem.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = hem; g.fillRect(0, 470, 1024, 42);
+  g.globalAlpha = .07; g.strokeStyle = '#000'; g.lineWidth = 7;
+  for(let i = 0; i < 9; i++){ const x = 60 + i*112 + (i % 2)*20, y = 300 + (i % 3)*26; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + 40, y + 18, x + 82, y + 6); g.stroke(); }
+  g.globalAlpha = .05; g.strokeStyle = '#fff'; g.lineWidth = 3;
+  for(let i = 0; i < 9; i++){ const x = 64 + i*112 + (i % 2)*20, y = 292 + (i % 3)*26; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + 40, y + 18, x + 82, y + 6); g.stroke(); }
+  g.restore();
+  noise(g, 0, 0, 1024, 512, 9000, .05);
+}
+function clothArms(g){
+  g.save();
+  /* the crook of the elbow, inside the arm (u = .75) */
+  for(const [x0, y0, yy] of [[0, 512, 22], [512, 512, 234]]){
+    const gr = g.createRadialGradient(x0 + 384, y0 + yy, 4, x0 + 384, y0 + yy, 90); gr.addColorStop(0, 'rgba(0,0,0,.2)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(x0, y0, 512, 256);
+  }
+  g.restore();
+  noise(g, 0, 512, 1024, 256, 4000, .05);
+}
+function sockShade(g){
+  const gr = g.createLinearGradient(256, 0, 384, 0); gr.addColorStop(0, 'rgba(0,0,0,.12)'); gr.addColorStop(.25, 'rgba(0,0,0,0)'); gr.addColorStop(.75, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,.12)');
+  g.fillStyle = gr; g.fillRect(256, 768, 128, 256);
+}
+function paintLeg(g, k){
+  const [c, s] = k.pants || ['#111111', null], x0 = 0, y0 = 768, w = 128, h = 256;
+  g.fillStyle = hexOf(c); g.fillRect(x0, y0, w, h);
+  /* the padded panels of a pair of breezers: quilting and seams */
+  g.save(); g.globalAlpha = .18; g.fillStyle = '#000';
+  for(const v of [.38, .66]) g.fillRect(x0, y0 + (1 - v)*h - 2, w, 3);
+  for(const u of [.0, .5, 1]) g.fillRect(x0 + u*w - 1.5, y0, 3, h);
+  g.globalAlpha = .1; g.fillStyle = '#fff'; for(const v of [.38, .66]) g.fillRect(x0, y0 + (1 - v)*h + 1, w, 2);
+  g.restore();
+  if(s){ g.fillStyle = hexOf(s); g.fillRect(x0 + .25*w - 5, y0, 10, h*.94); g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(x0 + .25*w - 6, y0, 1.5, h*.94); g.fillRect(x0 + .25*w + 4.5, y0, 1.5, h*.94); }
+  const hem = g.createLinearGradient(0, y0 + h, 0, y0 + h - 30); hem.addColorStop(0, 'rgba(0,0,0,.45)'); hem.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = hem; g.fillRect(x0, y0 + h - 30, w, 30);
+  noise(g, x0, y0, w, h, 1200, .05);
+}
+function paintWaist(g, k){
+  const [c, s] = k.pants || ['#111111', null], x0 = 128, y0 = 768, w = 128, h = 256;
+  g.fillStyle = hexOf(c); g.fillRect(x0, y0, w, h);
+  if(s) for(const u of [0, .5, 1]){ g.fillStyle = hexOf(s); g.fillRect(x0 + u*w - 5, y0 + h*.05, 10, h*.95); }
+  g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(x0, y0, w, 26);
+  g.fillStyle = 'rgba(0,0,0,.15)'; g.fillRect(x0 + .75*w - 1.5, y0, 3, h);
+  noise(g, x0, y0, w, h, 1200, .05);
+}
+/* the face: front half of the head, his right on the left of the canvas, chin at the bottom */
+function paintFace(g, L){
+  const x0 = 384, y0 = 768, W = 256, H = 256, X = u => x0 + u*W, Y = v => y0 + (1 - v)*H;
+  g.save(); g.beginPath(); g.rect(x0, y0, W, H); g.clip();
+  g.fillStyle = L.skin; g.fillRect(x0, y0, W, H);
+  /* modelling: darker towards the sides and under the jaw, warm on the cheeks */
+  let gr = g.createLinearGradient(x0, 0, x0 + W, 0);
+  gr.addColorStop(0, 'rgba(60,30,20,.35)'); gr.addColorStop(.25, 'rgba(60,30,20,.05)'); gr.addColorStop(.5, 'rgba(0,0,0,0)'); gr.addColorStop(.75, 'rgba(60,30,20,.05)'); gr.addColorStop(1, 'rgba(60,30,20,.35)');
+  g.fillStyle = gr; g.fillRect(x0, y0, W, H);
+  gr = g.createLinearGradient(0, Y(0), 0, Y(.2)); gr.addColorStop(0, 'rgba(40,20,10,.35)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x0, Y(.2), W, H*.2);
+  for(const u of [.34, .66]){ gr = g.createRadialGradient(X(u), Y(.3), 2, X(u), Y(.3), 26); gr.addColorStop(0, 'rgba(200,80,70,.16)'); gr.addColorStop(1, 'rgba(200,80,70,0)'); g.fillStyle = gr; g.fillRect(X(u) - 30, Y(.3) - 30, 60, 60); }
+  /* beard or stubble */
+  if(L.beard){
+    g.save(); g.globalAlpha = L.beard === 3 ? .85 : L.beard === 2 ? .55 : .28; g.fillStyle = L.hair;
+    g.beginPath(); g.moveTo(X(.12), Y(.33)); g.quadraticCurveTo(X(.2), Y(.02), X(.5), Y(-.02)); g.quadraticCurveTo(X(.8), Y(.02), X(.88), Y(.33));
+    g.lineTo(X(.8), Y(.3)); g.quadraticCurveTo(X(.66), Y(.13), X(.5), Y(.11)); g.quadraticCurveTo(X(.34), Y(.13), X(.2), Y(.3)); g.closePath(); g.fill();
+    g.beginPath(); g.ellipse(X(.5), Y(.235), 22, 6, 0, 0, TAU); g.fill();
+    g.restore();
+    noise(g, X(.12), Y(.33), W*.76, H*.33, 900, .25);
+  }
+  /* nose: a shadow down one side, nostrils */
+  g.fillStyle = 'rgba(70,35,20,.22)'; g.beginPath(); g.moveTo(X(.47), Y(.5)); g.quadraticCurveTo(X(.455), Y(.36), X(.465), Y(.3)); g.lineTo(X(.49), Y(.31)); g.quadraticCurveTo(X(.48), Y(.38), X(.49), Y(.5)); g.fill();
+  g.fillStyle = 'rgba(50,20,15,.55)'; for(const u of [.475, .525]){ g.beginPath(); g.ellipse(X(u), Y(.305), 4, 2.2, 0, 0, TAU); g.fill(); }
+  /* mouth */
+  g.strokeStyle = 'rgba(90,35,30,.75)'; g.lineWidth = 2.6; g.beginPath(); g.moveTo(X(.43), Y(.2)); g.quadraticCurveTo(X(.5), Y(.19), X(.57), Y(.2)); g.stroke();
+  g.fillStyle = 'rgba(150,70,60,.35)'; g.beginPath(); g.ellipse(X(.5), Y(.18), 12, 3.5, 0, 0, TAU); g.fill();
+  /* eyes, set back under the brow */
+  for(const u of [.37, .63]){
+    gr = g.createRadialGradient(X(u), Y(.44), 4, X(u), Y(.44), 22); gr.addColorStop(0, 'rgba(60,30,20,.3)'); gr.addColorStop(1, 'rgba(60,30,20,0)'); g.fillStyle = gr; g.fillRect(X(u) - 24, Y(.44) - 24, 48, 48);
+    g.fillStyle = '#e6ddd2'; g.beginPath(); g.ellipse(X(u), Y(.43), 8.5, 3.6, 0, 0, TAU); g.fill();
+    g.fillStyle = L.eyes; g.beginPath(); g.arc(X(u) + (u < .5 ? 1 : -1), Y(.43), 3.3, 0, TAU); g.fill();
+    g.fillStyle = '#0b0a09'; g.beginPath(); g.arc(X(u) + (u < .5 ? 1 : -1), Y(.43), 1.5, 0, TAU); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.7)'; g.fillRect(X(u) + 1, Y(.43) - 2, 1.5, 1.5);
+    g.strokeStyle = 'rgba(30,15,10,.8)'; g.lineWidth = 1.8; g.beginPath(); g.ellipse(X(u), Y(.43) + 1, 9.5, 4.6, 0, PI*1.05, PI*1.95); g.stroke();
+    /* the brow */
+    g.strokeStyle = shade(L.hair, -.1); g.lineWidth = 3.4; g.lineCap = 'round'; g.beginPath(); g.moveTo(X(u) - 11*(u < .5 ? 1 : -1), Y(.495)); g.quadraticCurveTo(X(u), Y(.525), X(u) + 12*(u < .5 ? 1 : -1), Y(.505)); g.stroke();
+  }
+  /* hair at the temples and above the brow, under the helmet's edge */
+  g.fillStyle = L.hair; g.fillRect(x0, Y(1), W, H*.32); g.fillRect(x0, Y(.75), W*.07, H*.4); g.fillRect(x0 + W*.93, Y(.75), W*.07, H*.4);
+  g.restore();
+  noise(g, x0, y0, W, H, 1600, .05);
+}
+function paintHelmet(g, k, num){
+  const x0 = 896, y0 = 768, W = 128, H = 128, c = hexOf(k.helm || k.b);
+  g.fillStyle = c; g.fillRect(x0, y0, W, H);
+  const gr = g.createLinearGradient(0, y0 + H, 0, y0); gr.addColorStop(0, 'rgba(0,0,0,.18)'); gr.addColorStop(.6, 'rgba(255,255,255,0)'); gr.addColorStop(1, 'rgba(255,255,255,.12)'); g.fillStyle = gr; g.fillRect(x0, y0, W, H);
+  /* vents: slots across the top and down the back */
+  g.fillStyle = 'rgba(0,0,0,.72)';
+  const slot = (u, v, w, h) => { const x = x0 + u*W, y = y0 + (1 - v)*H; g.beginPath(); g.ellipse(x, y, w, h, 0, 0, TAU); g.fill(); };
+  for(const u of [.2, .3]) slot(u, .78, 2.2, 7);
+  for(const u of [.08, .42]) slot(u, .6, 2, 6);
+  for(const u of [.58, .92]) slot(u, .6, 2, 6);
+  for(const u of [.7, .8]) slot(u, .72, 2.2, 7);
+  for(const u of [.75]) slot(u, .9, 5, 2);
+  /* a seam over the crown, the edge rubber */
+  g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(x0 + .25*W - .75, y0, 1.5, H*.6); g.fillRect(x0 + .75*W - .75, y0, 1.5, H*.6);
+  g.fillStyle = '#111'; g.fillRect(x0, y0 + H - 5, W, 5);
+  /* the number on the back */
+  if(num !== '' && num != null){
+    const n = k.n || ['#ffffff']; g.save(); g.translate(x0 + .75*W, y0 + .7*H); g.scale(.55, 1); g.font = '900 15px "Big Shoulders Display", Impact, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = lum(c) > .6 ? '#111' : (lum(n[0]) > .35 ? n[0] : '#ffffff'); g.fillText(String(num), 0, 0); g.restore();
+  }
+}
+
+/* materials: one per man, cached */
+const matCache = {};
+const VISOR = new T3.MeshStandardMaterial({ color: 0xeef6ff, roughness: .04, metalness: .2, transparent: true, opacity: .13, side: T3.DoubleSide, depthWrite: false, skinning: true });
+function manMat(abbr, name, num){
+  const key = abbr + '|' + name + '|' + num;
+  if(matCache[key]) return matCache[key];
+  const look = lookOf(name, num);
+  const map = C.paintTex(ATL, ATL, g => paintAtlas(g, abbr, name, num, look));
+  const m = new T3.MeshStandardMaterial({ map, roughnessMap: rmTex(), metalnessMap: rmTex(), roughness: 1, metalness: 1, skinning: true, side: T3.DoubleSide });
+  return matCache[key] = [m, VISOR];
+}
+
+/* ===================================== A MAN =====================================
+   S.pose(Pq) with Pq written for a left shot (see basePose). Returns { blade, Hh, hd }. */
+function make(parent){
+  if(!GEO) buildAll();
+  const S = { root: new T3.Group(), hand: 'L', abbr: '', name: '', num: '' };
+  (parent || C.world).add(S.root);
+  const bones = [...Array(NB)].map(() => new T3.Bone());
+  const skel = new T3.Skeleton(bones, INV.map(m => m.clone()));
+  const mesh = new T3.SkinnedMesh(GEO.hi, manMat('MTL', '', ''));
+  mesh.bindMode = 'detached'; mesh.bind(skel, new T3.Matrix4());
+  mesh.castShadow = true; mesh.frustumCulled = true;
+  S.root.add(mesh); S.mesh = mesh;
+  const R = newRig();
+  S.rig = R;
+  S.setKit = function(abbr, name, num, hand){
+    mesh.material = manMat(abbr, name, num);
+    S.hand = hand === 'R' ? 'R' : 'L'; S.abbr = abbr; S.name = name; S.num = num;
+    S.cur = null;
+  };
+  /* smoothing: everything eases to the new pose; a new source (match to shot) fades in slower */
+  let last = 0, far = false;
+  const wpos = V();
+  S.pose = function(Pq){
+    const now = performance.now()/1000, dt = last ? clamp(now - last, 0, .1) : 1; last = now;
+    if(!S.cur || dt >= .5){ S.cur = clonePose(Pq); S.src = Pq.src; S.xf = 0; }
+    if(Pq.src !== S.src){ S.src = Pq.src; S.xf = 1; }
+    S.xf = Math.max(0, (S.xf || 0) - dt/.4);
+    const rate = Pq.rate > 0 ? Pq.rate : 1e4, slowR = 7;
+    const r = lerp(rate, slowR, ease(S.xf));
+    blendPose(S.cur, Pq, 1 - Math.exp(-r*dt), 1 - Math.exp(-Math.max(r, 18)*dt*(1 - .6*ease(S.xf))));
+    const m = S.hand === 'R' ? -1 : 1;
+    const Pz = m < 0 ? mirrorPose(S.cur, S.mir || (S.mir = basePose())) : copyPose(S.cur, S.mir || (S.mir = basePose()));
+    plant(S, Pz, Pq.plant || 0, dt);
+    R.side = m;
+    solve(R, Pz);
+    for(let i = 0; i < NB; i++) bones[i].matrixWorld.copy(R.M[i]);
+    /* far away, the light mesh */
+    if(C.cam){
+      S.root.getWorldPosition(wpos);
+      const d = wpos.distanceTo(C.cam.position), want = far ? d > 8.5 : d > 9.5;
+      if(want !== far){ far = want; mesh.geometry = far ? GEO.lo : GEO.hi; }
+    }
+    const hd = V(R.heel.x - Pz.Bt.x, 0, R.heel.z - Pz.Bt.z); if(hd.lengthSq() < 1e-6) hd.set(-1, 0, 0); hd.normalize();
+    return { blade: R.blade.clone(), Hh: R.heel.clone(), hd };
+  };
+  return S;
+}
+/* feet stay where they are on the ice while he stands: a foot steps only once it is too far from
+   where the stance wants it, one foot at a time, lifted */
+function plant(S, Pz, w, dt){
+  const st = S.pl || (S.pl = [{ a: null, yaw: 0, step: 0, from: V(), fy: 0 }, { a: null, yaw: 0, step: 0, from: V(), fy: 0 }]);
+  const root = S.root, ry = root.rotation.y, c = Math.cos(ry), s = Math.sin(ry), rp = root.position;
+  const toW = (p, o) => o.set(rp.x + p.x*c + p.z*s, 0, rp.z - p.x*s + p.z*c);
+  const toL = (p, o) => { const dx = p.x - rp.x, dz = p.z - rp.z; return o.set(dx*c - dz*s, 0, dx*s + dz*c); };
+  const want = [V(), V()];
+  for(let i = 0; i < 2; i++){
+    const f = Pz.feet[i], P = st[i];
+    toW(f.p, want[i]);
+    if(w < .5 || !P.a){ P.a = want[i].clone(); P.yaw = f.yaw + ry; P.step = 0; continue; }
+  }
+  if(w < .5) return;
+  for(let i = 0; i < 2; i++){
+    const f = Pz.feet[i], P = st[i], o = st[1 - i];
+    if(P.step > 0){
+      P.step = Math.min(1, P.step + dt/.22);
+      const e = ease(P.step);
+      if(P.step >= 1){ P.step = 0; P.a.copy(want[i]); P.yaw = f.yaw + ry; }
+      else {
+        const pos = V().lerpVectors(P.from, want[i], e), lift = .06*Math.sin(PI*e);
+        toL(pos, f.p); f.p.y = lift; f.yaw = lerp(P.fy, f.yaw + ry, e) - ry; continue;
+      }
+    }
+    const off = P.a.distanceTo(want[i]), dyaw = Math.abs(Math.atan2(Math.sin(f.yaw + ry - P.yaw), Math.cos(f.yaw + ry - P.yaw)));
+    if((off > .17 || dyaw > .45) && o.step === 0){ P.step = .001; P.from.copy(P.a); P.fy = P.yaw; }
+    toL(P.a, f.p); f.p.y = 0; f.yaw = P.yaw - ry;
+  }
+}
+
+/* ===================================== POSES ===================================== */
+function foot(x = 0, z = 0, yaw = 0){ return { p: V(x, 0, z), yaw, zr: 0, pitch: 0, push: -1 }; }
+function basePose(){
+  return { px: 0, py: .87, pz: .11, lean: -.64, twist: 0, roll: 0, hipYaw: 0, hipRoll: 0, look: 0, headYaw: 0, gap: .47,
+    free: 0, freeTop: 0, fr: V(-.25, -.42, -.1), frTop: V(.25, -.42, -.1), Hh: V(-.36, 0, -.92), Bt: V(.16, .9, .03),
+    feet: [foot(-.18, -.03, .2), foot(.18, .05, -.2)], rate: 12, plant: 0, src: 'match', noStick: false };
+}
+const NUMS = ['px', 'py', 'pz', 'lean', 'twist', 'roll', 'hipYaw', 'hipRoll', 'look', 'headYaw', 'gap', 'free', 'freeTop'];
+function clonePose(Pq){ return copyPose(Pq, basePose()); }
+function copyPose(Pq, o){
+  for(const k of NUMS) o[k] = Pq[k];
+  o.fr.copy(Pq.fr); o.frTop.copy(Pq.frTop); o.Hh.copy(Pq.Hh); o.Bt.copy(Pq.Bt); o.noStick = Pq.noStick;
+  for(let i = 0; i < 2; i++){ const a = o.feet[i], b = Pq.feet[i]; a.p.copy(b.p); a.yaw = b.yaw; a.zr = b.zr; a.pitch = b.pitch; a.push = b.push; }
+  return o;
+}
+function blendPose(c, t, k, kf){
+  for(const key of NUMS) c[key] += (t[key] - c[key])*k;
+  c.fr.lerp(t.fr, k); c.frTop.lerp(t.frTop, k); c.noStick = t.noStick;
+  c.Hh.lerp(t.Hh, k); c.Bt.lerp(t.Bt, k);
+  const d = V().subVectors(c.Bt, c.Hh); if(d.lengthSq() < 1e-6) d.subVectors(t.Bt, t.Hh); c.Bt.copy(c.Hh).addScaledVector(d.normalize(), SL);
+  for(let i = 0; i < 2; i++){ const a = c.feet[i], b = t.feet[i]; a.p.lerp(b.p, kf); a.yaw += (b.yaw - a.yaw)*kf; a.zr += (b.zr - a.zr)*kf; a.pitch += (b.pitch - a.pitch)*kf; a.push = b.push; }
+}
+function mirrorPose(a, o){
+  for(const k of NUMS) o[k] = a[k];
+  o.px = -a.px; o.twist = -a.twist; o.roll = -a.roll; o.hipYaw = -a.hipYaw; o.hipRoll = -a.hipRoll; o.headYaw = -a.headYaw;
+  /* top and bottom hand keep their jobs (the rig knows which hand is on top); only their spots mirror */
+  o.fr.set(-a.fr.x, a.fr.y, a.fr.z); o.frTop.set(-a.frTop.x, a.frTop.y, a.frTop.z);
+  o.Hh.set(-a.Hh.x, a.Hh.y, a.Hh.z); o.Bt.set(-a.Bt.x, a.Bt.y, a.Bt.z); o.noStick = a.noStick;
+  for(let i = 0; i < 2; i++){ const f = a.feet[1 - i], g = o.feet[i]; g.p.set(-f.p.x, f.p.y, f.p.z); g.yaw = -f.yaw; g.zr = -f.zr; g.pitch = f.pitch; g.push = f.push; }
+  return o;
+}
+/* the stick: the heel at `heel`, the shaft up through Q (his hands), no steeper than the lie allows while
+   the blade is on the ice, so it lies flat */
+const _d = V();
+function stickTo(Pq, heel, Q, flat = true){
+  _d.subVectors(Q, heel); const h = Math.hypot(_d.x, _d.z);
+  if(flat && heel.y < .03){ const mx = h*Math.tan(PI - LIE - .02); if(_d.y > mx) _d.y = mx; }
+  Pq.Hh.copy(heel); Pq.Bt.copy(heel).addScaledVector(_d.normalize(), SL);
+}
+/* held from the knob end: the top hand at `hand`, the stick pointing `dir` from it to the blade */
+function stickFromHand(Pq, hand, dir){
+  const d = _d.copy(dir).normalize();
+  Pq.Bt.copy(hand).addScaledVector(d, -.055); Pq.Hh.copy(Pq.Bt).addScaledVector(d, SL);
+}
+
+/* ---------- the legs ---------- */
+/* a forward stride, one leg, p its phase: set down under the hip, glide, push out and back on the inside
+   edge, flick the toe, recover low under the body. k > 0 this leg crosses over (outside leg of a turn),
+   k < 0 it pushes under (inside leg) */
+function legFwd(s, p, a, k, o){
+  const xs = .11, xo = .16 + .44*a, zb = .06 + .38*a, zf = -.04 - .1*a, lift = .03 + .075*a;
+  const over = Math.max(0, k), under = Math.max(0, -k);
+  const x0 = lerp(lerp(xs, -.06, over), .27, under), x1 = lerp(xo + .05*over, -.16, under);
+  const outMax = (.2 + .5*a)*(1 - .7*under);
+  let x, z, y = 0, out, roll = 0, pitch = 0, push = -1;
+  if(p < .14){ const q = p/.14; x = x0; z = lerp(zf, zf + .05, q); out = .07; roll = .1*a*q*(1 - 2*under); }
+  else if(p < .6){
+    const q = (p - .14)/.46, e = ease(q);
+    x = lerp(x0, x1, e); z = lerp(zf + .05, zb*(1 - .45*under), Math.pow(q, 1.25)); out = lerp(.07, outMax, e);
+    roll = (.34*a*(1 - 2*under))*Math.sin(PI*Math.min(1, q*1.15)) + .1*a*(1 - q)*(1 - 2*under); pitch = .42*a*sst(.7, 1, q); push = q;
+  } else {
+    const q = (p - .6)/.4;
+    x = lerp(x1, x0, 1 - Math.pow(1 - q, 2.2)); z = lerp(zb*(1 - .45*under), zf, ease(q));
+    y = (lift + .06*over)*Math.sin(PI*Math.min(1, q*1.1)); out = lerp(outMax, .07, ease(q)); pitch = .42*a*(1 - sst(0, .45, q)) - .1*a*Math.sin(PI*q);
+  }
+  o.p.set(s*x, y, z); o.yaw = -s*out; o.zr = s*roll; o.pitch = pitch; o.push = push;
+  return o;
+}
+/* backwards: C-cuts, the heel pushed out and round in front, then the skate drawn back under the hip */
+function legBack(s, p, a, o){
+  const xs = .14, xo = .17 + .2*a, zf = -.24*a;
+  let x, z, y = 0, out = 0, roll = 0;
+  if(p < .55){ const q = p/.55, sn = Math.sin(PI*q); x = xs + (xo - xs)*sn; z = zf*ease(q); out = -(.12 + .42*a)*sn; roll = .3*a*sn; }
+  else { const q = (p - .55)/.45; x = xs; z = zf*(1 - ease(q)); y = .012*a*Math.sin(PI*q); out = .04*Math.sin(PI*q); }
+  o.p.set(s*x, y, z); o.yaw = -s*out; o.zr = s*roll; o.pitch = 0; o.push = p < .55 ? p/.55 : -1;
+  return o;
+}
+function mixFoot(a, b, t){ a.p.lerp(b.p, t); a.yaw = lerp(a.yaw, b.yaw, t); a.zr = lerp(a.zr, b.zr, t); a.pitch = lerp(a.pitch, b.pitch, t); if(t > .5) a.push = b.push; return a; }
+const FT = [...Array(12)].map(() => foot());
+const setFoot = (f, x, z, yaw, y = 0) => { f.p.set(x, y, z); f.yaw = yaw; f.zr = 0; f.pitch = 0; f.push = -1; return f; };
+
+/* everything below the waist and the trunk's rhythm, from how he is moving */
+function gait(s, Pq, dt, o){
+  const sp = o.speed, a = o.a, bk = o.bk, gl = o.gl, ks = o.ks, cr = o.cr, ph = s.gph;
+  const stand = clamp(1 - (sp - .35)/1.2);
+  for(let i = 0; i < 2; i++){
+    const si = i ? 1 : -1, p = frac(ph + (i ? .5 : 0));
+    const F = legFwd(si, p, a, cr*si, FT[i]), Bk = legBack(si, p, a, FT[2 + i]);
+    mixFoot(F, Bk, bk);
+    const G = setFoot(FT[4 + i], si*.115, i ? .1 : -.08, -si*.05);
+    mixFoot(F, G, gl);
+    const St = setFoot(FT[6 + i], si*.185, i ? .05 : -.03, -si*.2);
+    mixFoot(F, St, stand);
+    const f = Pq.feet[i]; f.p.copy(F.p); f.yaw = F.yaw; f.zr = F.zr; f.pitch = F.pitch; f.push = F.push;
+  }
+  const sw = Math.sin(TAU*ph), mv = (1 - stand)*(1 - gl);
+  Pq.px = -.05*a*sw*(1 - bk)*mv - .08*cr;
+  Pq.py = lerp(.87, .855 - .075*a, 1 - stand) + .02*a*mv*Math.cos(2*TAU*(ph - .08)) - .03*gl - .05*bk*(1 - stand);
+  Pq.lean = lerp(-.64, -.62 - .3*a, (1 - stand)*(1 - bk)) + .06*gl + .3*bk*(1 - stand);
+  Pq.pz = lerp(.11, .07, 1 - stand)*(1 - bk) + .03*bk - .02*gl;
+  Pq.hipYaw = .12*a*sw*(1 - bk)*mv; Pq.twist = -.07*a*sw*mv;
+  Pq.roll = .05*a*sw*mv + .3*cr; Pq.hipRoll = .12*cr;
+  /* the free arm swings with the opposite leg */
+  Pq.fr.set(-.25 - .05*sw*a, -.4 + .04*Math.abs(sw)*a, -.1 + .24*sw*a*(1 - bk));
+  /* a hockey stop: both skates across the way he was going, down low, leaning back from it */
+  if(ks > 0 && o.dl){
+    const d = o.dl;
+    let fx = d.z, fz = -d.x; if(fz > 0){ fx = -fx; fz = -fz; }
+    const yaw = Math.atan2(-fx, -fz);
+    for(let i = 0; i < 2; i++){
+      const si = i ? 1 : -1, lead = (si*d.x + 0) > 0 ? 1 : -1;
+      const f = Pq.feet[i], tgt = FT[8 + i];
+      setFoot(tgt, si*.25 + d.x*.16, (i ? .06 : -.06) + d.z*.16, yaw); tgt.zr = (d.x*Math.cos(yaw) - d.z*Math.sin(yaw))*.42;
+      mixFoot(f, tgt, ks);
+    }
+    Pq.px = lerp(Pq.px, -d.x*.12, ks); Pq.pz = lerp(Pq.pz, -d.z*.12, ks); Pq.py -= .13*ks;
+    Pq.lean = lerp(Pq.lean, -.42 - d.z*.32, ks); Pq.roll = lerp(Pq.roll, d.x*.32, ks);
+  }
+}
+
+/* ---------- the match ---------- */
+const scratch = new WeakMap();
+const PQ = s => { let o = scratch.get(s); if(!o){ o = basePose(); scratch.set(s, o); } return o; };
+function reset(Pq){ const b = BASE; for(const k of NUMS) Pq[k] = b[k]; Pq.fr.copy(b.fr); Pq.frTop.copy(b.frTop); Pq.rate = 12; Pq.plant = 0; Pq.src = 'match'; Pq.noStick = false; return Pq; }
+const BASE = basePose();
+const _v1 = V(), _v2 = V(), _v3 = V();
+/* the puck carrier's soft hands: the blade rocks forehand to backhand in a figure eight, head up */
+function handle(Pq, t, a, seed){
+  const w = TAU*(1.9 - .8*a)*t + seed, sx = Math.sin(w);
+  _v1.set(-.3 + .24*sx, 0, -1.0 + .07*Math.sin(2*w) - .05*a);
+  _v2.set(.13 + .07*sx, .8, -.2 + .03*Math.sin(2*w));
+  stickTo(Pq, _v1, _v2); Pq.gap = .46; Pq.look = .3; Pq.twist += -.1*sx; Pq.headYaw = .06*sx;
+}
+function readyStick(Pq, t, seed, x = 0){
+  _v1.set(-.36 + x + .03*Math.sin(t*1.3 + seed), 0, -1.04); _v2.set(.12, .8, -.24); stickTo(Pq, _v1, _v2); Pq.gap = .45;
+}
+function matchPose(s, t, now, reduced){
+  const T = now/1000, dt = clamp(T - (s._lt || T), 0, .1); s._lt = T;
+  const m = s.hand === 'R' ? -1 : 1, sp = s.speed || 0, seed = s.seed || 0;
+  s.gph = (s.gph || Math.random()) + dt*(s.back ? .78 + .1*sp : .7 + .12*sp);
+  s._bk = lerp(s._bk || 0, s.back ? 1 : 0, 1 - Math.exp(-dt*5));
+  const Pq = reset(PQ(s));
+  const gl = s.glide || 0, ks = s.stopK ? ease(Math.min(1, s.stopK*1.5)) : 0;
+  const a = clamp(sp/6.8)*(1 - .8*gl)*(1 - ks);
+  const cr = (1 - s._bk)*clamp((s.turn || 0)/2.2, -1, 1)*clamp((sp - 2)/2.5)*m;
+  /* the way he is going, in his own (left-shot) space, for the stop */
+  let dl = null;
+  if(ks > 0 && sp > .2){
+    const ry = s.root.rotation.y, c = Math.cos(ry), sn = Math.sin(ry);
+    dl = _v3.set((s.vx*c - s.vz*sn)/sp*m, 0, (s.vx*sn + s.vz*c)/sp);
+  }
+  gait(s, Pq, dt, { speed: sp, a, bk: s._bk, gl, ks, cr, dl });
+  Pq.plant = sp < .5 && !ks && s.mode !== 'cele' ? 1 : 0;
+  const k = (now - (s.t0 || 0))/1000;
+  /* one hand on the stick when he flies without the puck, the other arm swinging */
+  const oneHand = clamp((a - .45)/.3)*(s.mode === 'carry' || s.mode === 'pass' || s.mode === 'recv' ? 0 : 1);
+  readyStick(Pq, t, seed);
+  const mode = s.mode;
+  if(mode === 'carry'){
+    handle(Pq, t, a, seed);
+    const cu = (now - (s.cushT || 0))/320;
+    if(cu < 1){ const c = Math.sin(cu*PI)*(1 - cu*.4); Pq.Hh.z += .26*c; Pq.Hh.x -= .08*c; Pq.Bt.z += .2*c; Pq.twist += .08*c; Pq.rate = 22; }
+  } else if(mode === 'recv'){
+    /* the blade out on the ice to take it, square to the pass, soft */
+    _v1.set(-.5, 0, -1.02); _v2.set(.1, .78, -.14); stickTo(Pq, _v1, _v2); Pq.twist += .12; Pq.lean -= .05; Pq.look = .2; Pq.gap = .5;
+  } else if(mode === 'pass'){
+    const q = clamp(k/.42), sau = s.saucer ? 1 : 0;
+    /* the target's bearing in his own space */
+    let ang = 0; if(s.passAt){ const dx = s.passAt.x - s.x, dz = s.passAt.z - s.z, ry = s.root.rotation.y; ang = clamp(Math.atan2(-(dx*Math.cos(ry) - dz*Math.sin(ry)), -(dx*Math.sin(ry) + dz*Math.cos(ry)))*m, -.9, .9); }
+    const L1 = V(-.62, 0, -.42), L2 = V(Math.sin(ang)*-1.12 - .1, .02 + .3*sau*sst(.5, 1, q), -Math.cos(ang)*1.12);
+    if(q < .4){ const l = ease(q/.4); _v1.lerpVectors(V(-.3, 0, -.9), L1, l); _v2.set(.1, .78, -.04); Pq.twist += .3*l; Pq.px -= .05*l; }
+    else { const l = ease((q - .4)/.6); _v1.lerpVectors(L1, L2, l); _v1.y = Math.max(0, L2.y*sst(.5, 1, l)); _v2.set(lerp(.1, .22, l), lerp(.78, .86 + .1*sau, l), lerp(-.04, -.14, l)); Pq.twist += lerp(.3, -.32 + .3*ang, l); Pq.px += lerp(-.05, .05, l); Pq.lean -= .05*l; }
+    stickTo(Pq, _v1, _v2, _v1.y < .01); Pq.rate = 26; Pq.look = .2;
+  } else if(mode === 'lunge'){
+    const l = ease(clamp(k/.25));
+    _v1.set(lerp(-.4, -1.0, l), 0, lerp(-.9, -1.3, l)); _v2.set(.2, .7, -.2); stickTo(Pq, _v1, _v2);
+    Pq.free = l; Pq.fr.set(-.3, -.25, .05); Pq.lean -= .3*l; Pq.py -= .1*l; Pq.twist += .25*l; Pq.rate = 20;
+  } else if(mode === 'faceoff' || mode === 'draw'){
+    const d = mode === 'draw' ? ease(clamp(k/.28)) : 0;
+    /* the crouch: feet wide and staggered, bent over the dot, head up, the bottom hand low down the shaft */
+    Pq.pz = lerp(.34, .12, d); Pq.py = lerp(.76, .86, d); Pq.lean = lerp(-1.02, -.7, d); Pq.look = lerp(.66, .35, d); Pq.twist = .35*d;
+    setFoot(Pq.feet[0], -.36, lerp(.44, .2, d), .32); setFoot(Pq.feet[1], .34, lerp(.3, .12, d), -.26);
+    Pq.feet[0].zr = -.08; Pq.feet[1].zr = .08;
+    _v1.set(lerp(.02 + .015*Math.sin(t*9 + seed), -.52, d), 0, lerp(-.6, -.18, d));
+    _v2.set(lerp(.2, .14, d), lerp(.6, .7, d), lerp(.16, .1, d)); stickTo(Pq, _v1, _v2); Pq.gap = lerp(.62, .5, d);
+    Pq.plant = 1; Pq.rate = mode === 'draw' ? 24 : 8;
+  } else if(mode === 'sad'){
+    /* head down, the stick in one hand, dragging */
+    _v1.set(-.25, 0, -.75); stickFromHand(Pq, V(.2, .9, -.12), _v2.subVectors(_v1, V(.2, .9, -.12)));
+    Pq.free = 1; Pq.fr.set(-.22, -.5, -.02); Pq.lean = lerp(Pq.lean, -.3, .8); Pq.look = -.5; Pq.rate = 6;
+  } else if(mode === 'cele' || mode === 'join'){
+    cele(Pq, k, mode === 'join', seed, reduced);
+  } else if(s.follow){
+    /* defending: down in his stance, the stick out in the lane; skating backwards it is one-handed and long */
+    _v1.set(-.5 + .05*Math.sin(t*2.1 + seed), 0, -1.1); _v2.set(.14, .76, -.12); stickTo(Pq, _v1, _v2); Pq.lean -= .06; Pq.py -= .03; Pq.look = .2;
+    const one = Math.max(oneHand, s._bk*clamp(sp/1.5));
+    if(one > 0){ Pq.free = one; Pq.fr.set(-.3, -.32, -.18); _v1.set(-.35, 0, -1.25); stickTo(Pq, _v1, V(.18, .82, -.1)); }
+  } else {
+    /* ready, a tap of the stick now and then: give it here */
+    const tp = frac(t*.23 + seed*.37);
+    if(tp < .07 && sp < 1){ const u = Math.sin(tp/.07*PI); Pq.Hh.y += .09*u; Pq.Hh.x -= .03*u; }
+    if(oneHand > 0){ Pq.free = oneHand; _v1.set(-.32, .02, -1.05); stickTo(Pq, _v1, V(.2, .86, -.04), false); }
+  }
+  if(s.mode !== 'faceoff' && s.mode !== 'draw' && oneHand > 0 && !Pq.free && mode !== 'carry'){ Pq.free = oneHand; }
+  return Pq;
+}
+/* the goal: the stick held up high, a fist pumped, gliding on one skate. A team-mate arriving: stick
+   up, an arm out for him */
+function cele(Pq, k, join, seed, reduced){
+  const c = ease(clamp(k/.35));
+  const pump = reduced || join ? 0 : Math.max(0, Math.sin(Math.max(0, k - .35)*7.5));
+  const hand = V(lerp(.2, .3, c), lerp(.9, join ? 1.7 : 2.02, c), lerp(-.05, -.12, c));
+  const dir = V(join ? .5 : .28, join ? .55 : .92, join ? -.4 : .25);
+  if(c > .02){
+    const H0 = Pq.Hh.clone(), B0 = Pq.Bt.clone();
+    stickFromHand(Pq, hand, dir);
+    Pq.Hh.lerpVectors(H0, Pq.Hh, c); Pq.Bt.lerpVectors(B0, Pq.Bt, c);
+  }
+  Pq.free = c; Pq.fr.set(join ? -.3 : -.2, join ? .1 : lerp(.08, -.22, pump), join ? -.42 : -.26);
+  Pq.lean = lerp(Pq.lean, join ? -.3 : -.12, c); Pq.look = .25*c; Pq.twist = lerp(Pq.twist, join ? .1 : -.1, c);
+  if(!join && c > .5){ const g = ease(clamp((k - .5)/.4)); Pq.feet[0].p.lerp(V(-.18, .14, .42), g); Pq.feet[0].pitch = .5*g; Pq.feet[1].p.lerp(V(.06, 0, -.04), g); Pq.py = lerp(Pq.py, .92, g); }
+  Pq.rate = 10; Pq.plant = 0;
+}
+
+/* ---------- the shot (the shootout, and every shot in a match), a function of u ---------- */
+function shotPose(S, u, t, idle, o){
+  const K = o.K, now = performance.now()/1000, dt = clamp(now - (S._st || now), 0, .1); S._st = now;
+  const Pq = reset(PQ(S)); Pq.src = 'shot'; Pq.rate = 0;
+  const seed = seedOf(String(S.name) + S.num);
+  const kind = o.kind === 'one' ? 'one' : o.kind === 'brk' || (o.kind == null || o.kind === '') && (seed & 4) ? 'snap' : 'wrist';
+  if(idle){
+    /* at the line, waiting: stance, the puck on his blade */
+    gait(S, Pq, dt, { speed: 0, a: 0, bk: 0, gl: 0, ks: 0, cr: 0 });
+    handle(Pq, t*.6, 0, seed); Pq.rate = 8; Pq.src = 'shot';
+    return Pq;
+  }
+  const uD = K.deke, uL = K.load, uS = K.sweep, uR = K.shot;
+  /* skating in, then a glide into his shooting stance */
+  const a = clamp((u - K.go)/.04)*(1 - sst(.28, .42, u))*.95;
+  S.gph = (S.gph || 0) + dt*(.7 + .12*6.5*a);
+  gait(S, Pq, dt, { speed: 1.5 + 5*a, a, bk: 0, gl: sst(.3, .42, u)*(1 - sst(uD, uL, u)), ks: 0, cr: 0 });
+  /* the stance: back skate (left) turned out, front skate at the net */
+  const one = kind === 'one', st = sst(uD + (one ? 0 : .08), uL + .01, u);
+  const back = setFoot(FT[10], one ? -.32 : -.27, one ? .22 : .17, one ? .7 : .55), front = setFoot(FT[11], one ? .17 : .13, one ? -.26 : -.2, one ? -.14 : -.05);
+  back.zr = -.12; front.zr = .06;
+  mixFoot(Pq.feet[0], back, st); mixFoot(Pq.feet[1], front, st);
+  Pq.look = .2;
+  /* the hands */
+  const H = _v1, Q = _v2, LH0 = kind === 'snap' ? V(-.48, 0, -.62) : V(-.66, 0, -.4);
+  if(u < uD || (one && u < uD)){
+    handle(Pq, t, a, seed);
+  } else if(u < uL && !one){
+    /* the deke: forehand, across to the backhand, back */
+    const d = (u - uD)/(uL - uD), sx = Math.sin(TAU*d)*(1 - .3*d), amp = kind === 'snap' ? .38 : .5;
+    H.set(-.3 + amp*sx, 0, -.86 - .1*Math.sin(PI*d)); Q.set(.12 + .08*sx, .8, -.06);
+    const L = sst(.75, 1, d); H.lerp(LH0, L*.6);
+    stickTo(Pq, H, Q); Pq.twist += -.18*sx + .114*L; Pq.headYaw = -.05*sx; Pq.px -= .024*L;
+  }
+  if(!one && u >= uL){
+    const LH = LH0, LQ = V(.06, .74, -.02);
+    const EH = V(-.12, 0, -1.04), EQ = V(.2, .8, .03);
+    /* where the deke left the stick */
+    const DH = V(-.3, 0, -.86).lerp(LH, .6), DQ = V(.12, .8, -.06);
+    if(u < uS){ const l = ease((u - uL)/(uS - uL)); H.lerpVectors(DH, LH, l); Q.lerpVectors(DQ, LQ, l); Pq.twist += lerp(.38*.3, .38, l); Pq.px += lerp(-.08*.3, -.08, l); Pq.lean -= .08*l; }
+    else if(u < uR){ const r = Math.pow((u - uS)/(uR - uS), 1.4); H.lerpVectors(LH, EH, r); Q.lerpVectors(LQ, EQ, r); Pq.twist += lerp(.38, -.15, r); Pq.px += lerp(-.08, .05, r); Pq.lean -= .1; }
+    else {
+      const f = ease(clamp((u - uR)/.07)), rel = sst(uR + .1, .92, u), hi = o.high ? 1 : 0;
+      H.lerpVectors(EH, V(-.02, (kind === 'snap' ? .18 : .28) + .4*hi, -1.42), f).lerp(V(-.36, 0, -.9), rel);
+      Q.lerpVectors(EQ, V(.26, .95 + .1*hi, -.12), f).lerp(V(.12, .8, -.08), rel);
+      Pq.twist += lerp(-.15, -.38, f)*(1 - rel); Pq.px += .06*(1 - rel); Pq.lean = lerp(Pq.lean, -.5, f*(1 - rel));
+      /* the back leg comes off the ice in the follow-through */
+      const lb = f*(1 - rel); Pq.feet[0].p.lerp(V(-.3, .13, .42), lb); Pq.feet[0].pitch = .5*lb;
+    }
+    stickTo(Pq, H, Q, H.y < .01);
+  }
+  if(one && u >= uD){
+    /* the one-timer: wind up high, down through the ice an inch behind the puck, finish high */
+    const wB = V(.12, .96, -.28), wD = V(-.62, .5, .62).normalize();
+    const iH = V(-.2, 0, -.9), iQ = V(.08, .7, -.18);
+    if(u < uS){
+      const w = ease(clamp((u - uD)/(uS - uD - .02)));
+      stickTo(Pq, V(-.32, 0, -.9), V(.12, .8, -.06));
+      const H0 = Pq.Hh.clone(), B0 = Pq.Bt.clone();
+      stickFromHand(Pq, wB, wD);
+      Pq.Hh.lerpVectors(H0, Pq.Hh, w); Pq.Bt.lerpVectors(B0, Pq.Bt, w);
+      Pq.twist += .62*w; Pq.px -= .09*w; Pq.lean -= .05*w; Pq.gap = lerp(.46, .58, w);
+    } else {
+      const r = clamp((u - uS)/(uR - uS)), f = ease(clamp((u - uR)/.08)), rel = sst(uR + .12, .93, u);
+      const Bw = V().copy(wB).addScaledVector(wD, -.055), Hw = Bw.clone().addScaledVector(wD, SL);
+      stickTo(Pq, iH, iQ); const Hi = Pq.Hh.clone(), Bi = Pq.Bt.clone();
+      if(u < uR){
+        /* down through an arc: the knob leads, the blade follows */
+        const e = r*r;
+        Pq.Bt.lerpVectors(Bw, Bi, Math.sqrt(r)); const dir = V().subVectors(Hw, Bw).normalize().lerp(V().subVectors(Hi, Bi).normalize(), e).normalize();
+        Pq.Hh.copy(Pq.Bt).addScaledVector(dir, SL); if(Pq.Hh.y < 0){ Pq.Bt.y -= Pq.Hh.y; Pq.Hh.y = 0; }
+        Pq.twist += lerp(.62, -.1, e); Pq.px += lerp(-.09, .04, e);
+      } else {
+        stickFromHand(Pq, V(.3, 1.08, -.38), V(-.1, -.55, -1).lerp(V(-.6, -1, -.4), rel));
+        if(f < 1){ const H1 = Pq.Hh.clone(), B1 = Pq.Bt.clone(); Pq.Hh.lerpVectors(Hi, H1, f); Pq.Bt.lerpVectors(Bi, B1, f); }
+        if(rel > 0){ const H1 = Pq.Hh.clone(), B1 = Pq.Bt.clone(); stickTo(Pq, V(-.36, 0, -.9), V(.12, .8, -.08)); Pq.Hh.lerpVectors(H1, Pq.Hh, rel); Pq.Bt.lerpVectors(B1, Pq.Bt, rel); }
+        Pq.twist += lerp(-.1, -.55, f)*(1 - rel); Pq.px += .06*(1 - rel); Pq.lean = lerp(Pq.lean, -.45, f*(1 - rel));
+        const lb = f*(1 - rel); Pq.feet[0].p.lerp(V(-.36, .1, .45), lb); Pq.feet[0].pitch = .55*lb;
+      }
+      Pq.gap = .58;
+    }
+  }
+  /* scored: up it goes */
+  if(o.scored && u > .76){ cele(Pq, (u - .76)*o.DUR/1000, false, seed, o.reduced); Pq.rate = 10; }
+  return Pq;
+}
+/* the sweater room: stood up, the stick resting on the ice, one hand on the knob */
+function showPose(S, t){
+  const Pq = reset(PQ(S)); Pq.src = 'show'; Pq.rate = 8;
+  setFoot(Pq.feet[0], -.17, -.02, .22); setFoot(Pq.feet[1], .17, .04, -.22);
+  Pq.py = 1.02; Pq.lean = -.14; Pq.twist = .05*Math.sin(t*.8); Pq.look = .05;
+  stickFromHand(Pq, V(.23, .95 + .01*Math.sin(t*1.3), -.2), V(-.5, -.93, -.35));
+  Pq.free = 1; Pq.fr.set(-.27, -.5, -.03);
+  return Pq;
+}
+
+/* ===================================== THE LAB =====================================
+   server/lab-skaters.html: one man, every motion, the camera round him. */
+const MOTIONS = {
+  ready: { len: 6 }, stride: { len: 4 }, sprint: { len: 4 }, glide: { len: 4 }, crossL: { len: 6 }, crossR: { len: 6 }, back: { len: 4 },
+  stop: { len: 3.2 }, handle: { len: 4 }, carry: { len: 4 }, recv: { len: 2 }, pass: { len: 1.8 }, saucer: { len: 1.8 },
+  wrist: { len: 3.6 }, snap: { len: 3.6 }, one: { len: 3.6 }, faceoff: { len: 3.2 }, defend: { len: 4 }, lunge: { len: 1.6 }, cele: { len: 3.4 }, join: { len: 3 }, sad: { len: 3 }, show: { len: 4 }
+};
+const lab = { kit: 'MTL', name: 'SUZUKI', num: 14, hand: 'R', motion: 'stride', t: 0, ts: 1, pause: false, cam: 'orbit', ang: 2.4, dist: 3.4, h: 1.0, cycle: false, auto: true, at: null, scored: true, high: false };
+const labS = { x: 0, z: 0, vx: 0, vz: 0, head: 0, speed: 0, turn: 0, back: false, glide: 0, stopK: 0, stopSide: 1, mode: 'idle', t0: 0, seed: 1.3, cushT: -1e9, follow: null, gph: 0 };
+function labSet(S, o){
+  const kitChanged = ['kit', 'name', 'num', 'hand'].some(k => o[k] != null && o[k] !== lab[k]);
+  Object.assign(lab, o);
+  if(o.motion || o.t != null) lab.lt = 0;
+  if(kitChanged || !S.abbr) S.setKit(lab.kit, lab.name, lab.num, lab.hand);
+}
+function labStep(S, t, dt, X){
+  if(!S.abbr) S.setKit(lab.kit, lab.name, lab.num, lab.hand);
+  const mo = MOTIONS[lab.motion] ? lab.motion : 'ready', len = MOTIONS[mo].len;
+  if(lab.at != null){ lab.t = lab.at; }
+  else if(!lab.pause) lab.t += dt*lab.ts;
+  if(lab.cycle && lab.t > len*2){ const ks = Object.keys(MOTIONS); lab.motion = ks[(ks.indexOf(mo) + 1) % ks.length]; lab.t = 0; }
+  const lt = lab.t % len, cyc = Math.floor(lab.t/len);
+  const s = labS; s.root = S.root; s.hand = S.hand;
+  const ZC = X.ZC;
+  /* where he is: skating moves go up and down the ice, turns go round a circle */
+  let x = 0, z = ZC + .62, head = 0, speed = 0, turn = 0, back = false, glide = 0, mode = 'idle', follow = null;
+  const lin = (v) => { z = ZC + 7 - frac(lab.t*v/16)*16; };
+  const T = lab.t, now = T*1000;
+  if(mo === 'stride' || mo === 'carry'){ speed = 4.2; lin(speed); if(mo === 'carry') mode = 'carry'; }
+  else if(mo === 'sprint'){ speed = 7.6; lin(speed); }
+  else if(mo === 'glide'){ speed = 4; lin(speed); glide = 1; }
+  else if(mo === 'back' || mo === 'defend'){ speed = mo === 'back' ? 3.6 : 2.6; z = ZC - 7 + frac(T*speed/16)*16; back = true; if(mo === 'defend') follow = { press: true }; }
+  /* events at fixed moments of each loop, so a frozen frame (at) shows the same thing every time */
+  const c0 = (T - lt)*1000;
+  if(mo === 'stop'){
+    if(lt < 1.5){ speed = 6.5; z = ZC + 5 - lt*6.5; s.stopK = 0; }
+    else { const k2 = Math.min(lt - 1.5, .46); speed = Math.max(0, 6.5 - (lt - 1.5)*14); z = ZC + 5 - 1.5*6.5 - (6.5*k2 - 7*k2*k2); s.stopK = Math.max(0, 1 - (lt - 1.5)*2.3); s.stopSide = cyc % 2 ? -1 : 1; }
+  }
+  else if(mo === 'handle') mode = 'carry';
+  else if(mo === 'recv'){ mode = lt < 1 ? 'recv' : 'carry'; s.cushT = c0 + 1000; }
+  else if(mo === 'pass' || mo === 'saucer'){ mode = lt < .6 ? 'carry' : 'pass'; s.t0 = c0 + 600; s.saucer = mo === 'saucer'; s.passAt = { x: -3, z: ZC - 6 }; }
+  else if(mo === 'faceoff'){ mode = lt < 2.2 ? 'faceoff' : 'draw'; s.t0 = c0 + 2200; }
+  else if(mo === 'lunge'){ mode = 'lunge'; s.t0 = c0; }
+  else if(mo === 'cele' || mo === 'join'){ mode = mo; speed = mo === 'cele' ? 3 : 2; lin(speed); s.t0 = c0; }
+  else if(mo === 'sad'){ mode = 'sad'; speed = 1.4; lin(speed); }
+  else if(mo === 'crossL' || mo === 'crossR'){ speed = 6; const R0 = 3.4, w = speed/R0, sg = mo === 'crossL' ? 1 : -1, a = T*w*sg; x = -sg*R0 + sg*R0*Math.cos(a); z = ZC - R0*Math.sin(a)*sg*sg; head = a; turn = w*sg; }
+  /* velocity from the motion, as the match's steering would give it */
+  const pv = s._p || { x, z }, vdt = Math.max(1e-3, dt*lab.ts);
+  s.vx = lab.at != null ? 0 : (x - pv.x)/vdt; s.vz = lab.at != null ? 0 : (z - pv.z)/vdt; s._p = { x, z };
+  if(Math.hypot(s.vx, s.vz) > 30 || lab.at != null){ s.vx = -Math.sin(head)*speed*(back ? -1 : 1); s.vz = -Math.cos(head)*speed*(back ? -1 : 1); }
+  if(mo !== 'stop') s.stopK = 0;
+  Object.assign(s, { x, z, head, speed, turn, back, glide, mode, follow });
+  const ks = s.stopK ? ease(Math.min(1, s.stopK*1.5)) : 0;
+  S.root.position.set(x, 0, z); S.root.rotation.y = head + (s.stopSide || 0)*1.15*ks;
+  let Pq;
+  if(mo === 'wrist' || mo === 'snap' || mo === 'one'){
+    const u = clamp(lt/len*1.05);
+    const r0 = X.rootAt ? null : null;
+    S.root.position.set(0, 0, ZC + 4 - 4*ease(clamp((u - X.K.go)/(X.K.shot - X.K.go))) - 1.2*clamp((u - X.K.shot)/.3));
+    S.gph = T*1.3; S._st = performance.now()/1000;
+    Pq = shotPose(S, u, T, false, { K: X.K, DUR: len*1000, scored: lab.scored, kind: mo === 'one' ? 'one' : mo === 'snap' ? 'brk' : 'wrist', high: lab.high });
+    lab.u = u;
+  }
+  else if(mo === 'show') Pq = showPose(S, T);
+  else { s._lt = T; s._bk = back ? 1 : 0; s.gph = T*(back ? .78 + .1*speed : .7 + .12*speed) + .13; Pq = matchPose(s, T, now, false); }
+  if(lab.at != null) Pq.rate = 0;
+  const r = S.pose(Pq);
+  lab.root = S.root.position; lab.S = S; lab.len = len;
+  return S.root.localToWorld(r.blade.clone());
+}
+/* the lab's camera: round him, or one of the fixed looks */
+const FOCUS = { gloveT: [.62, .1, 2.6], gloveB: [.62, .1, 2.9], skate: [.75, .12, 2.2], head: [.62, .02, 2.8], face: [.55, -.06, 2.85], knee: [.9, .1, 2.0] };
+function labCam(cam, key, dt){
+  const p = lab.root || V(0, 0, 27.75);
+  const F = FOCUS[lab.cam], S = lab.S;
+  if(F && S){
+    const R = S.rig, top = R.side > 0 ? 1 : 0;
+    const bone = { gloveT: B.hd[top], gloveB: B.hd[1 - top], skate: B.ft[1], head: B.hed, face: B.hed, knee: B.sh[1] }[lab.cam];
+    const tg = S.root.localToWorld(V().setFromMatrixPosition(R.M[bone]));
+    const ang = S.root.rotation.y + F[2] + (lab.spin || 0), D = F[0]*(lab.zoom || 1);
+    cam.position.set(tg.x + Math.sin(ang)*D, tg.y + F[1] + D*.25, tg.z + Math.cos(ang)*D); cam.lookAt(tg);
+    if(Math.abs(cam.fov - 34) > .01){ cam.fov = 34; cam.updateProjectionMatrix(); }
+    key.target.position.set(p.x, 0, p.z); key.position.set(p.x + 2.5, 16, p.z + 10); key.target.updateMatrixWorld();
+    return;
+  }
+  const C0 = { orbit: [null, 3.4, 1.05, .95], front: [PI, 3.2, 1.1, .95], back: [0, 3.2, 1.2, 1.0], side: [PI/2, 3.4, 1.0, .9], left: [-PI/2, 3.4, 1.0, .9], three: [2.4, 3.1, 1.15, .95],
+    face: [2.75, .95, 1.75, 1.72], hands: [2.3, 1.5, 1.0, .75], feet: [2.2, 1.5, .35, .18], low: [2.5, 3.0, .35, .8], tv: [.35, 14, 6.5, .6], top: [.2, 6, 6.5, .5] }[lab.cam] || [null, 3.4, 1.05, .95];
+  if(C0[0] == null){ if(!lab.pause && lab.auto) lab.ang += dt*.35; }
+  const ang = C0[0] == null ? lab.ang : C0[0] + (lab.spin || 0), D = C0[1]*(lab.zoom || 1), hy = C0[2], ly = C0[3];
+  cam.position.set(p.x + Math.sin(ang)*D, hy, p.z + Math.cos(ang)*D); cam.lookAt(p.x, ly, p.z);
+  const fov = lab.fov || 34; if(Math.abs(cam.fov - fov) > .01){ cam.fov = fov; cam.updateProjectionMatrix(); }
+  key.target.position.set(p.x, 0, p.z); key.position.set(p.x + 2.5, 16, p.z + 10); key.target.updateMatrixWorld();
+}
+
+return {
+  make, matchPose, shotPose, showPose, SL,
+  labSet, labStep, labCam, lab, MOTIONS: Object.keys(MOTIONS),
+  geo: () => GEO, lookOf
+};
+};
+})();

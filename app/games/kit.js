@@ -175,6 +175,30 @@ function match(guess, items){
   return hits;
 }
 
+/* ---------------- faces: NHL headshots (PUCK.FACES, app/games/faces.js) ----------------
+   face(name, { size, team, shape: "circle"|"shield", pop, delay, flag, ghost, cls }) -> html.
+   A team-colour ring, a little shine, the mug cropped to the face, lazy-loaded.
+   No photo (no entry, the NHL only has the silhouette, or the image fails):
+   an initials badge in the team's colours. Fixed size, so nothing shifts. */
+const initials = n => { const p = String(n || "").replace(/[^\p{L}\s\-']/gu, "").trim().split(/\s+/); return ((p[0] || "?")[0] + (p.length > 1 ? p[p.length - 1][0] : "")).toUpperCase(); };
+function faceOf(name){ return (P.FACES || {})[norm(name)] || null; }
+function face(name, o = {}){
+  const F = faceOf(name), team = o.team || (F && F.team) || null, T = team ? P.team(team) : { c1: "#1b3a66", c2: "#ffd36a" };
+  const size = o.size || 56, img = F && F.img;
+  return '<span class="gx-face' + (o.shape === "shield" ? " shield" : "") + (img ? "" : " nf") + (o.pop === false ? "" : " pop") + (o.ghost ? " ghost" : "") + (o.cls ? " " + o.cls : "") +
+    '" style="--fs:' + size + "px;--tc:" + T.c1 + ";--tc2:" + T.c2 + (o.delay ? ";--fd:" + o.delay + "ms" : "") + '" role="img" aria-label="' + esc(name) + '">' +
+    '<span class="rim"><span class="in"><i class="ini">' + esc(initials(name)) + "</i>" +
+      (img ? '<img src="' + esc(img) + '" alt="" loading="lazy" decoding="async" width="' + size + '" height="' + size + '" referrerpolicy="no-referrer">' : "") +
+      '<i class="gl"></i></span></span>' +
+    (o.flag ? '<img class="fl" src="' + P.flag(o.flag) + '" alt="">' : "") + "</span>";
+}
+/* a mug that fails to load falls back to the initials underneath */
+if(typeof document !== "undefined") document.addEventListener("error", e => {
+  const t = e.target; if(!t || t.tagName !== "IMG" || t.classList.contains("fl")) return;
+  const f = t.closest && t.closest(".gx-face"); if(!f) return;
+  f.classList.add("nf"); t.remove();
+}, true);
+
 /* ---------------- players ---------------- */
 function defaultPlayers(){
   const names = (window.PUCK_CONFIG && PUCK_CONFIG.DEMO_PLAYERS) || ["Martijn", "Felix", "Ale"];
@@ -370,5 +394,5 @@ function stars(o){
   if(!RM()) setTimeout(() => confetti(tie || solo ? ["#ffffff", "#F2C230", "#8fd0ff", "#E3343B"] : [ps[0].col.c, "#ffffff", ps[0].col.d, "#F2C230"], { n: 170 }), 450);
 }
 
-P.kit = { stall, turnable, RM, esc, sleep, shuffle, store, PC, J, design, jersey, norm, lev, match, keys, setup, board, countUp, clock, spray, confetti, hats, callout, stars, STAR };
+P.kit = { stall, turnable, RM, esc, sleep, shuffle, store, PC, J, design, jersey, norm, lev, match, keys, setup, board, countUp, clock, spray, confetti, hats, callout, stars, STAR, face, faceOf, initials };
 })();

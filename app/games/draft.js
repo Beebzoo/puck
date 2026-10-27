@@ -108,6 +108,9 @@ function pick(G){
       paintBoard(); K.countUp($('#dd-board .gx-pl[data-p="' + p.i + '"] .sc'), p.score);
       say(solo ? "Right pick." : "<b>" + K.esc(p.name) + "</b> +" + pts + (pts === 1 ? ", stolen." : ". Franchise pick."), "good");
     } else say("It was " + K.esc(d.name) + ".", "bad");
+    /* the big screen cuts from the logo to the pick's draft photo */
+    const scrImg = $(".dd-stage .scr-in > img");
+    if(scrImg) scrImg.outerHTML = K.face(d.name, { team: d.team, size: 52, shape: "shield", ghost: !p, delay: K.RM() ? 0 : 450 });
     /* the pick walks up: sweater on, cap on, cameras go */
     const box = $("#dd-pick");
     box.innerHTML = '<div class="jj">' + K.jersey(d.team, { name: surname(d.name), number: 1, ghost: !p }) + '</div><div class="cap">' + cap(d.team) + "</div>";
@@ -117,7 +120,7 @@ function pick(G){
         { duration: 800, delay: 550, easing: "cubic-bezier(.5,0,.4,1)", fill: "both" });
       if(p) flashes();
     }
-    const after = '<div class="card dd-info"><div class="row"><img class="logo-img" src="' + P.logo(d.team, true) + '" alt="" width="40" height="40"><div><b>' + K.esc(d.name) + "</b> " +
+    const after = '<div class="card dd-info"><div class="row">' + K.face(d.name, { team: d.team, size: 52, delay: K.RM() ? 0 : 150 }) + '<div><b>' + K.esc(d.name) + "</b> " +
       (d.cc ? '<img class="flag" src="' + P.flag(d.cc) + '" alt="">' : "") + '<small>' + K.esc((POSN[d.pos] || d.pos) + " · from " + d.from) + "</small></div></div>" +
       '<p class="one">' + K.esc(d.second) + " went second." + (d.note ? " " + K.esc(d.note) : "") + "</p></div>";
     await K.sleep(K.RM() ? 0 : 900);
