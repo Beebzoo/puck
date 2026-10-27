@@ -1,0 +1,4 @@
+{
+  "about": "Every deck the app loads. The browser can't list a folder, so add a new _bank/questions/<deck>.jsonl here too.",
+  "decks": ["nhl", "olympics", "international", "world", "rules", "habs", "oilers", "culture"]
+}

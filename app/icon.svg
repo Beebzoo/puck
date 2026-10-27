@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect width="200" height="200" rx="44" fill="#0C1828"/><g transform="translate(14 34) scale(.86)">
+  <defs>
+    <linearGradient id="p0sd" x1="0" x2="1"><stop offset="0" stop-color="#030405"/><stop offset=".16" stop-color="#15191e"/><stop offset=".3" stop-color="#2e353e"/><stop offset=".42" stop-color="#14181d"/><stop offset=".8" stop-color="#07090b"/><stop offset="1" stop-color="#010101"/></linearGradient>
+    <linearGradient id="p0sv" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset=".7" stop-color="#000" stop-opacity=".15"/><stop offset="1" stop-color="#000" stop-opacity=".6"/></linearGradient>
+    <radialGradient id="p0tp" cx=".38" cy=".3" r=".75"><stop offset="0" stop-color="#434b56"/><stop offset=".45" stop-color="#22272e"/><stop offset="1" stop-color="#0a0c0f"/></radialGradient>
+    <linearGradient id="p0au" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff0b8"/><stop offset=".3" stop-color="#f3cd6b"/><stop offset=".6" stop-color="#c99a2e"/><stop offset=".85" stop-color="#f6d57c"/><stop offset="1" stop-color="#8a6512"/></linearGradient>
+    <pattern id="p0kn" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="none"/><path d="M0 0H5M0 0V5" stroke="#505a66" stroke-width=".9"/></pattern>
+    <clipPath id="p0sc"><path d="M12 56 A88 37 0 0 0 188 56 L188 86 A88 37 0 0 1 12 86 Z"/></clipPath>
+    <clipPath id="p0tc"><ellipse cx="100" cy="56" rx="88" ry="37"/></clipPath>
+    <filter id="p0gr" x="0" y="0" width="1" height="1"><feTurbulence type="fractalNoise" baseFrequency="1.4" numOctaves="2" seed="7"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .55 -.18"/><feComposite in2="SourceGraphic" operator="in"/></filter>
+    <filter id="p0bl" x="-.3" y="-.3" width="1.6" height="1.6"><feGaussianBlur stdDeviation="3"/></filter>
+    <filter id="p0bs" x="-.5" y="-.5" width="2" height="2"><feGaussianBlur stdDeviation="1.2"/></filter>
+    <path id="p0ta" d="M-73 0 A73 73 0 0 1 73 0"/><path id="p0tb" d="M-83 0 A83 83 0 0 0 83 0"/>
+  </defs>
+  <ellipse cx="104" cy="90" rx="92" ry="22.94" fill="#000" opacity=".42" filter="url(#p0bl)"/>
+  <path d="M12 56 A88 37 0 0 0 188 56 L188 86 A88 37 0 0 1 12 86 Z" fill="url(#p0sd)"/>
+  <g clip-path="url(#p0sc)"><rect x="12" y="60" width="176" height="67" fill="url(#p0kn)" opacity=".75"/>
+    <path d="M12 56 A88 37 0 0 0 188 56 L188 86 A88 37 0 0 1 12 86 Z" fill="url(#p0sd)" opacity=".55"/>
+    <path d="M12 59 A88 37 0 0 0 188 59" fill="none" stroke="#3a424c" stroke-width="1.4"/>
+    <path d="M12 83 A88 37 0 0 0 188 83" fill="none" stroke="#2b3139" stroke-width="1.2"/>
+    <rect x="54" y="56" width="16" height="71" fill="#9fb6ca" opacity=".22" filter="url(#p0bs)"/></g>
+  <path d="M12 56 A88 37 0 0 0 188 56 L188 86 A88 37 0 0 1 12 86 Z" fill="url(#p0sv)"/>
+  <ellipse cx="100" cy="56" rx="88" ry="37" fill="url(#p0tp)"/>
+  <ellipse cx="100" cy="56" rx="88" ry="37" fill="#fff" filter="url(#p0gr)" opacity=".5"/>
+  <g transform="translate(100 56) scale(1 0.4205)">
+    <g class="spin">
+      <g transform="translate(0 3)" fill="none" stroke="#000" opacity=".55"><circle r="66" stroke-width="6"/><circle r="50" stroke-width="2"/></g>
+      <circle r="66" fill="none" stroke="url(#p0au)" stroke-width="5.5"/>
+      <circle r="50" fill="none" stroke="url(#p0au)" stroke-width="2"/>
+      <g font-family="Barlow Semi Condensed, Arial Narrow, sans-serif" font-weight="800" font-size="11.5" letter-spacing="1.1" text-anchor="middle">
+        <text fill="#000" opacity=".6" transform="translate(0 2)"><textPath href="#p0ta" startOffset="50%">FELIX · ALEJANDRO · MARTIJN</textPath></text>
+        <text fill="url(#p0au)"><textPath href="#p0ta" startOffset="50%">FELIX · ALEJANDRO · MARTIJN</textPath></text>
+        <text fill="#000" opacity=".6" transform="translate(0 2)" font-size="14" letter-spacing="3"><textPath href="#p0tb" startOffset="50%">MCJESUS · 2026</textPath></text>
+        <text fill="url(#p0au)" font-size="14" letter-spacing="3"><textPath href="#p0tb" startOffset="50%">MCJESUS · 2026</textPath></text></g>
+      <path transform="translate(0 2.5)" d="M0.00 -34.00L8.23 -11.33L32.34 -10.51L13.31 4.33L19.98 27.51L0.00 14.00L-19.98 27.51L-13.31 4.33L-32.34 -10.51L-8.23 -11.33Z" fill="#000" opacity=".5"/>
+      <path d="M0.00 -34.00L8.23 -11.33L32.34 -10.51L13.31 4.33L19.98 27.51L0.00 14.00L-19.98 27.51L-13.31 4.33L-32.34 -10.51L-8.23 -11.33Z" fill="url(#p0au)"/>
+      <path d="M0.00 -34.00L8.23 -11.33L32.34 -10.51L13.31 4.33L19.98 27.51L0.00 14.00L-19.98 27.51L-13.31 4.33L-32.34 -10.51L-8.23 -11.33Z" fill="none" stroke="#fff3c4" stroke-width="1" opacity=".5"/>
+    </g>
+  </g>
+  <path d="M13.85 50.99 A87 36 0 0 1 87.89 20.35" fill="none" stroke="#c9d8e6" stroke-width="2" stroke-linecap="round" opacity=".6"/>
+  <path d="M18.25 43.69 A87 36 0 0 1 53.90 25.47" fill="none" stroke="#fff" stroke-width="1.4" stroke-linecap="round" opacity=".8"/>
+  <path d="M12 56 A88 37 0 0 0 188 56" fill="none" stroke="#5a6572" stroke-width="1" opacity=".7"/>
+</g></svg>

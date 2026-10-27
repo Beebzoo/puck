@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0C1828">
+<title>PUCK</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:ital,wght@0,800;1,900&family=Big+Shoulders+Display:wght@600;800;900&family=Lora:ital,wght@0,400;1,400&display=swap">
+<link rel="icon" href="app/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app/style.css">
+<link rel="stylesheet" href="app/logo.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Graduate&family=Alfa+Slab+One&family=Russo+One&display=swap">
+<link rel="stylesheet" href="app/faceoff.css">
+<link rel="stylesheet" href="app/games/games.css">
+</head>
+<body>
+<main id="app"></main>
+<nav class="tabbar" id="tabbar" aria-label="Sections">
+  <a href="#home" data-tab="home"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="10" rx="8" ry="3.2"/><path d="M4 10v4c0 1.8 3.6 3.2 8 3.2s8-1.4 8-3.2v-4"/></svg>Play</a>
+  <a href="#pool" data-tab="pool"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5M8 17h3"/></svg>Pool</a>
+  <a href="#table" data-tab="table"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v4a5 5 0 0 1-10 0z"/><path d="M12 13v4M8 20h8M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>Table</a>
+  <a href="#me" data-tab="me"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg>Me</a>
+</nav>
+<script src="app/config.js"></script>
+<script src="app/data.js"></script>
+<script src="app/scoring.js"></script>
+<script src="app/vendor/supabase.js"></script>
+<script src="app/vendor/three.min.js"></script>
+<script src="app/logo.js"></script>
+<script src="app/nhl.js"></script>
+<script src="app/store.js"></script>
+<script src="app/questions.js"></script>
+<script src="app/assets/kits.js"></script>
+<script src="app/rink3d.js"></script>
+<script src="app/faceoff.js"></script>
+<!-- plug-in games (app/games/*.js) go here, before app.js -->
+<script src="app/games/data.js"></script>
+<script src="app/games/kit.js"></script>
+<script src="app/games/five.js"></script>
+<script src="app/games/wore.js"></script>
+<script src="app/games/draft.js"></script>
+<script src="app/games/locker.js"></script>
+<script src="app/app.js"></script>
+</body>
+</html>

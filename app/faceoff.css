@@ -1,0 +1,99 @@
+/* Faceoff: One on One on ice. The rink, the tags over the men, the call bar,
+   the question card, the hand-over. Builds on style.css (cards, pills, .qcard). */
+.fo{--t-easy:#5fd38a;--t-normal:#f2c94c;--t-hard:#ff9a3c;--t-extreme:#ff5a4f}
+.fo-play{padding-bottom:8px}
+.fo-top{display:flex;align-items:center;gap:10px;color:#fff;padding:calc(10px + env(safe-area-inset-top,0px)) max(14px,env(safe-area-inset-right,0px)) 10px max(14px,env(safe-area-inset-left,0px));
+  background:linear-gradient(98deg,#0c1828 0 62%,#16283f 62.2%);max-width:none}
+.fo-top h1{font:900 italic 26px/1 var(--display);letter-spacing:.02em;text-shadow:0 2px 0 #0a1a2e}
+.fo-top .fo-sub{margin-left:auto;font:800 11px/1 var(--display);letter-spacing:.14em;text-transform:uppercase;color:#9fb2c4}
+.fo-top .back{color:#fff;text-decoration:none;background:rgba(255,255,255,.08);border:1.5px solid rgba(255,255,255,.6);border-radius:999px;width:32px;height:32px;display:grid;place-items:center;font-size:18px;line-height:1}
+.fo-play .wrap{padding-top:8px}
+
+/* the scoreboard */
+.fo-board{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:stretch;border-radius:12px;overflow:hidden;background:#04080e;border:2px solid #2b3a4d;color:#fff;margin-bottom:8px}
+.fo-board .tm{display:flex;align-items:center;gap:7px;padding:6px 8px;min-width:0;border-bottom:3px solid transparent}
+.fo-board .tm.r{flex-direction:row-reverse;text-align:right}
+.fo-board .tm.has{border-bottom-color:var(--tc);background:linear-gradient(0deg,color-mix(in srgb,var(--tc) 30%,transparent),transparent 70%)}
+.fo-board .tm img{width:34px;height:34px;flex:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))}
+.fo-board .tm div{min-width:0}
+.fo-board .tm b{font:900 15px/1 var(--display);text-transform:uppercase;letter-spacing:.03em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.fo-board .tm small{font:800 10px/1.2 var(--display);letter-spacing:.1em;text-transform:uppercase;color:#9fb2c4;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fo-board .mid{display:grid;justify-items:center;align-content:center;background:#0b1320;padding:4px 10px;min-width:92px}
+.fo-board .mid b{font:900 30px/1 var(--display);letter-spacing:.06em;color:#ffd84d;text-shadow:0 0 8px rgba(255,216,77,.45);font-variant-numeric:tabular-nums}
+.fo-board .mid small{font:800 10px/1.2 var(--display);letter-spacing:.12em;color:#9fb2c4;text-transform:uppercase;white-space:nowrap}
+.fo-board .mid small.diff{color:#6f8396;font-size:9px}
+.fo-board .mid .sod{color:#ffd84d;letter-spacing:.05em}
+
+/* the rink, taller than the default card */
+.fo-rink .rink{aspect-ratio:auto;height:min(52vh,520px);max-height:none}
+.fo-kit .rink{aspect-ratio:auto;height:300px;max-height:none;border-width:0;border-radius:12px;box-shadow:none}
+.fo-kitroom{padding:8px}
+.fo-kit-bar{display:flex;justify-content:space-between;align-items:center;padding:6px 4px 0}
+.fo-who{border-left:6px solid var(--tc)}
+.fo-who-top{display:flex;align-items:center;gap:12px}
+.fo-name{font:900 italic 24px/1 var(--display);text-transform:uppercase}
+.fo-line{display:block;font:800 11px/1.3 var(--display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-top:3px}
+.tbtn:disabled{opacity:.35;cursor:default}
+
+/* tags over the men */
+.rink .tags{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.rink .tag{position:absolute;left:0;top:0;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:2px;padding:0;border:0;background:none;color:#fff;font:800 10px/1 var(--display);letter-spacing:.06em;text-transform:uppercase;will-change:transform}
+.rink .tag .nm{background:rgba(6,12,22,.72);border:1px solid rgba(255,255,255,.35);border-radius:6px;padding:3px 6px;white-space:nowrap;text-shadow:0 1px 2px #000}
+.rink .tag.us .nm{border-color:var(--tc);box-shadow:inset 0 -2px 0 var(--tc)}
+.rink .tag.them .nm{background:rgba(6,12,22,.45);border-color:transparent;font-size:9px;padding:2px 4px;color:#cfdbe6}
+.rink .tag.has .nm{background:#F2C230;color:#1b1503;border-color:#F2C230;text-shadow:none}
+.rink .tag .tier:empty{display:none}
+.rink .tag .tier{border-radius:4px;padding:2px 5px;color:#111;font-size:9px;letter-spacing:.1em}
+.rink .tag.pick{pointer-events:auto;cursor:pointer;padding:6px 4px;margin-top:-6px}
+.rink .tag.pick .nm{font-size:12px;padding:5px 8px;animation:tagpulse 1.4s ease-in-out infinite}
+.rink .tag.t-easy .tier{background:var(--t-easy)}.rink .tag.t-normal .tier{background:var(--t-normal)}
+.rink .tag.t-hard .tier{background:var(--t-hard)}.rink .tag.t-extreme .tier{background:var(--t-extreme)}
+.rink .tag.pick:hover .nm,.rink .tag.pick:focus-visible .nm{background:#fff;color:#0c1828}
+@keyframes tagpulse{50%{box-shadow:inset 0 -2px 0 var(--tc),0 0 0 4px rgba(255,255,255,.18)}}
+
+/* the call bar: whose puck, what to do */
+.fo-call{margin-top:8px;display:grid;gap:8px;background:var(--ice-2);border:2px solid #fff;border-left:6px solid var(--tc,#16283f);border-radius:12px;padding:10px 12px;box-shadow:0 4px 10px rgba(12,24,40,.1);font:italic 14.5px/1.4 var(--body);color:var(--muted)}
+.fo-call:empty{display:none}
+.fo-call b{font:900 16px/1 var(--display);text-transform:uppercase;letter-spacing:.03em;color:var(--ink);font-style:normal;margin-right:6px}
+.fo-call em{display:block;color:#9a3b00;font-style:italic}
+.fo-call .fo-logo img{width:24px;height:24px;display:inline-block;vertical-align:-6px;margin-right:6px}
+.fo-acts{display:flex;gap:8px;flex-wrap:wrap}
+.fo-acts .pill{padding:11px 20px;font-size:18px}
+.tierchip{display:inline-block;border-radius:5px;padding:3px 6px;font:800 10px/1 var(--display);letter-spacing:.1em;text-transform:uppercase;color:#111;font-style:normal;vertical-align:2px}
+.tierchip.t-easy{background:var(--t-easy)}.tierchip.t-normal{background:var(--t-normal)}.tierchip.t-hard{background:var(--t-hard)}.tierchip.t-extreme{background:var(--t-extreme)}
+
+/* the question card */
+.fo-q{margin-top:8px;border-left:6px solid var(--tc,#fff)}
+.fo-qhead{display:flex;justify-content:space-between;align-items:center;gap:8px;font:800 11px/1.2 var(--display);letter-spacing:.1em;text-transform:uppercase;color:#9fb2c4}
+.fo-qhead b{color:#fff;font-size:13px;margin-right:4px}
+.fo-qhead .fo-logo img{width:22px;height:22px;display:inline-block;vertical-align:-6px;margin-right:6px}
+.fo-q .opt.chosen{outline:2px solid #fff;outline-offset:1px}
+
+/* the hand-over: the whole screen in the goalie's colours */
+.fo-hand{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:var(--tc,#0c1828);background-image:linear-gradient(160deg,rgba(0,0,0,.15),rgba(0,0,0,.55));color:#fff;padding:24px;text-align:center}
+.fo-hand-in{display:grid;justify-items:center;gap:10px;max-width:340px}
+.fo-hand-in img{filter:drop-shadow(0 4px 10px rgba(0,0,0,.5))}
+.fo-hand .label{color:rgba(255,255,255,.75)}
+.fo-hand h2{font:900 italic 48px/1 var(--display);text-transform:uppercase;text-shadow:0 4px 0 rgba(0,0,0,.35)}
+.fo-hand .one{color:rgba(255,255,255,.85)}
+
+/* the toast: across the top of the rink */
+.fo-rink{position:relative}
+.fo-toast{position:absolute;left:50%;top:10px;transform:translate(-50%,-8px);max-width:calc(100% - 24px);background:rgba(12,24,40,.88);color:#fff;border:1.5px solid rgba(255,255,255,.6);border-radius:999px;padding:7px 14px;font:800 12px/1.25 var(--display);letter-spacing:.05em;text-transform:uppercase;text-align:center;opacity:0;pointer-events:none;z-index:6;transition:opacity .25s,transform .25s}
+.fo-toast.on{opacity:1;transform:translate(-50%,0)}
+/* a question up: the rink steps back so the card fits */
+.fo-play.asking .fo-rink .rink{height:28vh}
+.fo-play.asking .fo-call{display:none}
+.fo-play.asking .fo-toast{display:none}
+
+/* full time */
+.fo-final{margin-top:10px;text-align:center;display:grid;gap:10px;justify-items:center;border-top:6px solid var(--tc)}
+.fo-final h2{font-size:34px}
+.fo-stats{border-collapse:collapse;width:100%;max-width:320px;font:800 15px/1 var(--display);text-transform:uppercase}
+.fo-stats td,.fo-stats th{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.12)}
+.fo-stats td{width:35%;font-variant-numeric:tabular-nums}
+.fo-stats th{font-size:11px;letter-spacing:.12em;color:#9fb2c4}
+.fo-stats thead td{font-size:12px;color:#ffd84d}
+.fo-scorers{text-align:left;width:100%;max-width:340px}
+.fo-scorers b{color:#fff;font-style:normal}
+@media (prefers-reduced-motion:reduce){.rink .tag.pick .nm{animation:none}}
