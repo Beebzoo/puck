@@ -23,7 +23,7 @@ function until(iso){
 }
 
 /* ---------------- router ---------------- */
-const ROUTES = { home, pool, table, me, faceoff, lists };
+const ROUTES = { home, pool, table, nhl, me, faceoff, lists };
 /* plug-in games: P.addGame({ id, title, sub, render(arg) }) from app/games/*.js;
    they get a Home tile and the route #<id> (or #<id>-<arg>) */
 P.games = P.games || [];
@@ -56,6 +56,8 @@ async function home(){ P.p26.play(app); }
 async function pool(){ return P.pool.page(app, band); }
 async function table(){ return P.pool.table(app, band); }
 async function me(){ return P.pool.me(app, band); }
+/* ---------------- NHL: the stats centre, app/nhl/nhl-tab.js (#nhl, #nhl-standings, #nhl-team-MTL…) ---------------- */
+async function nhl(arg){ return P.nhlTab.render(app, arg || ""); }
 
 /* ---------------- Faceoff: One on One on ice, in app/faceoff.js ---------------- */
 function faceoff(arg){ return P.faceoff.render(arg); }

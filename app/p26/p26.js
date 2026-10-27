@@ -1,7 +1,7 @@
 /* PUCK 26: the menu shell, from _brand/puck26/source/menu.js.
    - boot(): the PRESS START title screen (once per app open, only when the app
      opens on Play; a link straight to #pool or a game skips it)
-   - the header (horizontal PUCK 26 logo + LB PLAY POOL TABLE ME RB tabs) and the
+   - the header (horizontal PUCK 26 logo + LB PLAY POOL TABLE NHL ME RB tabs) and the
      footer (NHL FACTS ticker + A/B/Y hints), which replace the old bottom bar
    - play(): the Play screen (pool strip, preview card, the six skewed mode bars)
    - startMode(): the loading screen with a tip, then the mode's real route
@@ -40,8 +40,9 @@ const TIPS = [
   "The Original Six are <b>BOS, CHI, DET, MTL, NYR and TOR</b>."
 ];
 const FACTS = "The Canadiens have won 24 Stanley Cups · Alex Ovechkin passed Wayne Gretzky with his 895th goal in April 2025 · Sidney Crosby went first overall in the 2005 draft · Mario Lemieux went first overall in 1984 · The Original Six: BOS, CHI, DET, MTL, NYR, TOR · ";
-const TABS = [["play", "#home"], ["pool", "#pool"], ["table", "#table"], ["me", "#me"]];
-const TAB_OF = { home: "play", pool: "pool", table: "table", me: "me" };
+/* NHL: the stats centre (app/nhl/nhl-tab.js); its sub-pages (#nhl-standings, #nhl-team-MTL…) are all route "nhl" */
+const TABS = [["play", "#home"], ["pool", "#pool"], ["table", "#table"], ["nhl", "#nhl"], ["me", "#me"]];
+const TAB_OF = { home: "play", pool: "pool", table: "table", nhl: "nhl", me: "me" };
 
 /* ---------- logos ---------- */
 function glowDefs(id){

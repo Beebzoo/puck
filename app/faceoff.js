@@ -305,10 +305,28 @@ function interceptor(b){
 }
 
 /* ---------------- the screen ---------------- */
-function render(){
+async function render(){
   U = P.ui;
   if(M && M.live) return play();
+  await applyFavourite();
   return setup();
+}
+/* your favourite team (picked on Me) becomes Player 1's team, once per change of
+   favourite, so you start in your own jersey but can still swap for a match */
+async function applyFavourite(){
+  let me = null;
+  try { me = P.store && await P.store.me(); } catch(e){}
+  const fav = me && me.team;
+  if(!fav || !P.team(fav) || !P.team(fav).c1) return;
+  const s = loadSetup();
+  if(s.favSeen === fav) return;
+  s.favSeen = fav;
+  s.p[0].team = fav;
+  const names = (window.PUCK_CONFIG || {}).DEMO_PLAYERS || [];
+  const mine = names.find(n => me.name && me.name.toLowerCase().startsWith(n.toLowerCase()));
+  if(mine) s.p[0].name = mine;
+  if(s.p[1].team === fav) s.p[1].team = fav === 'EDM' ? 'MTL' : 'EDM';
+  saveSetup(s);
 }
 const SND_ON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 const SND_OFF = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16.5 9.5l5 5M21.5 9.5l-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';

@@ -58,5 +58,45 @@ async function poolGames(){
   }
   return { games: Object.values(out).sort((a, b) => a.start < b.start ? -1 : 1), offlineSince: notes.length ? Math.min(...notes) : null };
 }
-P.nhl = { get, poolGames, scoreNow };
+/* ---------- for the NHL tab (app/nhl/): a short memory cache over get() ----------
+   q(path, params): the path with its own query string, encoded (the relays check it
+   key by key, see server/serve.js). cached(path, ttl): the same answer for ttl ms
+   (one request in flight per path), then fresh from the feed; offline it falls back to
+   the last answer get() kept in localStorage ({ fresh: false, at }). The tab's answers
+   are many (players, rosters), so only the last LRU_MAX of them stay on the phone. */
+const q = (path, params) => path + "?" + Object.keys(params).map(k => encodeURIComponent(k) + "=" + encodeURIComponent(params[k])).join("&");
+const mem = new Map(), flying = new Map(), LRU = "puck.nhl.lru", LRU_MAX = 36;
+const KEEP = p => /club-schedule-season\/(MTL|EDM)\/now$|\/score\/now$/.test(p);
+function remember(path){
+  if(KEEP(path)) return;
+  try {
+    let l = JSON.parse(localStorage.getItem(LRU)) || [];
+    l = l.filter(x => x !== path); l.push(path);
+    while(l.length > LRU_MAX) localStorage.removeItem("puck.nhl:" + l.shift());
+    localStorage.setItem(LRU, JSON.stringify(l));
+  } catch(e){}
+}
+async function cached(path, ttl = 180000){
+  const hit = mem.get(path);
+  if(hit && hit.fresh && Date.now() - hit.got < ttl) return hit;
+  if(flying.has(path)) return flying.get(path);
+  const p = (async () => {
+    try {
+      const r = await get(path);
+      const out = { data: r.data, fresh: r.fresh, at: r.fresh ? Date.now() : r.at, got: Date.now() };
+      if(r.fresh) remember(path);
+      mem.set(path, out);
+      return out;
+    } finally { flying.delete(path); }
+  })();
+  flying.set(path, p);
+  return p;
+}
+/* what's in memory or on the phone right now, without a request (for an instant first paint) */
+function peek(path){
+  const hit = mem.get(path); if(hit) return hit;
+  try { const c = JSON.parse(localStorage.getItem("puck.nhl:" + path)); if(c) return { data: c.j, fresh: false, at: c.at }; } catch(e){}
+  return null;
+}
+P.nhl = { get, poolGames, scoreNow, q, cached, peek };
 })();
