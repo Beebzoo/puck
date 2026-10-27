@@ -30,9 +30,23 @@ function game(x){
   const st = x.gameState, final = st === "FINAL" || st === "OFF";
   const ending = x.gameOutcome ? x.gameOutcome.lastPeriodType : (x.periodDescriptor && x.periodDescriptor.periodType) || null;
   const side = t => ({ abbr: t.abbrev, score: typeof t.score === "number" ? t.score : null, logo: t.logo, dark: t.darkLogo, name: (t.placeName && t.placeName.default) || t.abbrev });
+  const gw = x.winningGoalScorer;
   return { id: x.id, start: x.startTimeUTC, type: x.gameType, state: st, final, live: st === "LIVE" || st === "CRIT",
     ending: final ? ending : null, period: x.periodDescriptor ? x.periodDescriptor.number : null,
+    ptype: x.periodDescriptor ? x.periodDescriptor.periodType : null,
+    gwg: gw && gw.lastName ? ((gw.firstInitial && gw.firstInitial.default) ? gw.firstInitial.default + " " : "") + gw.lastName.default : null,
     home: side(x.homeTeam), away: side(x.awayTeam), venue: x.venue && x.venue.default };
+}
+/* today's scoreboard: the live clock and the teams' records, by game id
+   { [id]: { state, period, ptype, clock, intermission, away: {score, record}, home: {...} } } */
+async function scoreNow(){
+  const r = await get("/v1/score/now"), out = {};
+  for(const x of (r.data && r.data.games) || []){
+    const t = s => ({ score: typeof s.score === "number" ? s.score : null, record: s.record || null });
+    out[x.id] = { state: x.gameState, period: x.periodDescriptor ? x.periodDescriptor.number : x.period || null, ptype: x.periodDescriptor ? x.periodDescriptor.periodType : null,
+      clock: x.clock ? x.clock.timeRemaining : null, intermission: !!(x.clock && x.clock.inIntermission), away: t(x.awayTeam), home: t(x.homeTeam) };
+  }
+  return out;
 }
 /* regular season and playoff games of the Pool teams, one list, no doubles when they meet */
 async function poolGames(){
@@ -44,5 +58,5 @@ async function poolGames(){
   }
   return { games: Object.values(out).sort((a, b) => a.start < b.start ? -1 : 1), offlineSince: notes.length ? Math.min(...notes) : null };
 }
-P.nhl = { get, poolGames };
+P.nhl = { get, poolGames, scoreNow };
 })();

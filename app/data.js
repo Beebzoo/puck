@@ -76,6 +76,8 @@ P.SCORING = {
   ending: 1,        // called overtime or the shootout and it went there
   endingWinner: 1,  // ... and had the right winner too
   loneWolf: 1,      // the only one of us with the right winner
-  jokerMult: 2      // one joker a week doubles a game
+  jokerMult: 2,     // one joker a week doubles a game
+  derby: ["MTL", "EDM"], // when these two meet ...
+  derbyMult: 2      // ... the game counts double (a joker on it makes ×4). 1 = off
 };
 })();

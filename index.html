@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#01040a">
 <title>PUCK</title>
+<script>/* the title screen will show: keep the app hidden until it is up (no flash of the menu) */try{var h=location.hash.slice(1);if((!h||h==="home")&&sessionStorage.getItem("puck.booted")!=="1")document.documentElement.classList.add("p26-pre")}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:ital,wght@0,800;1,900&family=Big+Shoulders+Display:wght@600;800;900&family=Lora:ital,wght@0,400;1,400&family=Exo+2:ital,wght@0,600;0,700;1,700;1,900&family=Michroma&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:ital,wght@0,800;1,900&family=Big+Shoulders+Display:wght@600;800;900&family=Exo+2:ital,wght@0,400..900;1,400..900&family=Michroma&display=swap">
 <link rel="icon" href="app/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="app/style.css">
 <link rel="stylesheet" href="app/logo.css">
@@ -15,6 +16,8 @@
 <link rel="stylesheet" href="app/faceoff.css">
 <link rel="stylesheet" href="app/games/games.css">
 <link rel="stylesheet" href="app/p26/p26.css">
+<link rel="stylesheet" href="app/p26/skin26.css">
+<link rel="stylesheet" href="app/pool/pool.css">
 </head>
 <body>
 <div class="p26" id="p26">
@@ -34,9 +37,13 @@
 <script src="app/questions.js"></script>
 <script src="app/assets/kits.js"></script>
 <script src="app/rink3d.js"></script>
+<script src="app/faceoff/sfx.js"></script>
 <script src="app/faceoff.js"></script>
 <script src="app/p26/draw26.js"></script>
+<script src="app/p26/boot26.js"></script>
+<script src="app/p26/rain26.js"></script>
 <script src="app/p26/p26.js"></script>
+<script src="app/pool/pool.js"></script>
 <!-- plug-in games (app/games/*.js) go here, before app.js -->
 <script src="app/games/data.js"></script>
 <script src="app/games/kit.js"></script>

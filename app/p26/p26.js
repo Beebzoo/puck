@@ -20,17 +20,17 @@ const BG = {
 };
 /* the six modes, in the order of the design; route = the app's own hash */
 const MODES = [
-  { id: "faceoff", name: "Faceoff", tag: "1 on 1", text: "One on one, like BALL. Pass with a right answer, shoot, score.", face: "Suzuki", bg: BG.MTL, big: "1v1" },
-  { id: "lists", name: "Lists", tag: "Top 10s", text: "The last 10 Cup winners, the Original Six, top 10s.", face: "Mario_Lemieux", bg: BG.PIT, big: "10" },
-  { id: "five", name: "Starting Five", tag: "5 names", text: "Name the top five on the ice.", face: "McDavid", bg: BG.EDM, big: "5" },
-  { id: "wore", name: "Who wore it?", tag: "Buzzer", text: "A number, a team, a buzzer race.", face: "Jagr", bg: BG.CZE, big: "#" },
-  { id: "draft", name: "Draft Day", tag: "1st picks", text: "First overall picks. You're on the clock.", face: "Crosby", bg: BG.PIT, big: "1st" },
-  { id: "locker", name: "The Locker Room", tag: "Hi · Lo", text: "Higher or lower, stall by stall.", face: "Ovechkin", bg: BG.WSH, big: "↑↓" }
+  { id: "faceoff", team: "MTL", name: "Faceoff", tag: "1 on 1", text: "One on one, like BALL. Pass with a right answer, shoot, score.", face: "Suzuki", bg: BG.MTL, big: "1v1" },
+  { id: "lists", team: "EDM", name: "Lists", tag: "Top 10s", text: "The last 10 Cup winners, the Original Six, top 10s.", face: "McDavid_EDM", bg: BG.EDM, big: "10" },
+  { id: "five", team: "PIT", name: "Starting Five", tag: "5 names", text: "Name the top five on the ice.", face: "Crosby_PIT", bg: BG.PIT, big: "5" },
+  { id: "wore", team: "NHL", name: "Who wore it?", tag: "Buzzer", text: "A number, a team, a buzzer race.", face: "Jagr", bg: BG.CZE, big: "#" },
+  { id: "draft", team: "EDM", name: "Draft Day", tag: "1st picks", text: "First overall picks. You're on the clock.", face: "Draisaitl_EDM", bg: BG.EDM, big: "1st", fit: "height:100%;width:46%;right:0" },
+  { id: "locker", team: "WSH", name: "The Locker Room", tag: "Hi · Lo", text: "Higher or lower, stall by stall.", face: "Ovechkin", bg: BG.WSH, big: "↑↓" }
 ];
 function modes(){
   /* any plug-in game that isn't in the design's six still gets a bar */
   const extra = (P.games || []).filter(g => !MODES.some(m => m.id === g.id))
-    .map(g => ({ id: g.id, name: g.title, tag: "New", text: g.sub || "", face: null, bg: BG.NHL, big: "?" }));
+    .map(g => ({ id: g.id, name: g.title, tag: "New", text: g.sub || "", face: null, team: "NHL", bg: BG.NHL, big: "?" }));
   return MODES.concat(extra);
 }
 const TIPS = [
@@ -66,45 +66,40 @@ function stackedLogo(){
 }
 
 /* ---------- the boot screen ---------- */
-function bootScene(){
-  const id = "bt" + D.nextId(), r = D.rng(26);
-  const sparks = [...Array(18)].map(() => { const x = 300 + r()*20, y = 640 + (r() - .5)*30, l = 8 + r()*26, a = (r() - .5)*.5;
-    return '<path d="M' + x.toFixed(1) + " " + y.toFixed(1) + " l" + (Math.cos(a)*l).toFixed(1) + " " + (Math.sin(a)*l).toFixed(1) + '" stroke="' + (r() < .5 ? "#ffd36a" : "#fff4d6") + '" stroke-width="' + (1 + r()*1.4).toFixed(1) + '" stroke-linecap="round"/>'; }).join("");
-  const rink = [...Array(10)].map((_, i) => '<path d="M' + (195 + (i - 4.5)*26) + " 600 L" + (195 + (i - 4.5)*110) + ' 844" stroke="#fff" stroke-opacity=".05"/>').join("");
-  return '<svg viewBox="0 0 390 844" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>' +
-    '<radialGradient id="' + id + 'bg" cx=".5" cy=".36" r=".8"><stop offset="0" stop-color="#1b4787"/><stop offset=".45" stop-color="#0a1c38"/><stop offset="1" stop-color="#01040a"/></radialGradient>' +
-    '<linearGradient id="' + id + 'ice" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9cc4e6" stop-opacity=".35"/><stop offset=".25" stop-color="#d6e9f7" stop-opacity=".18"/><stop offset="1" stop-color="#0a1830" stop-opacity=".95"/></linearGradient>' +
-    '<linearGradient id="' + id + 'bm" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cfe6ff" stop-opacity=".3"/><stop offset="1" stop-color="#cfe6ff" stop-opacity="0"/></linearGradient>' +
-    '<linearGradient id="' + id + 'sw" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2f8fff" stop-opacity="0"/><stop offset=".45" stop-color="#2f8fff" stop-opacity=".9"/><stop offset="1" stop-color="#9fe0ff" stop-opacity=".15"/></linearGradient>' +
-    '<linearGradient id="' + id + 'tr" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ffd36a" stop-opacity=".9"/><stop offset=".35" stop-color="#9fd8ff" stop-opacity=".45"/><stop offset="1" stop-color="#9fd8ff" stop-opacity="0"/></linearGradient>' +
-    '<radialGradient id="' + id + 'fl" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff"/><stop offset=".25" stop-color="#bfe4ff" stop-opacity=".7"/><stop offset="1" stop-color="#2f8fff" stop-opacity="0"/></radialGradient>' +
-    '<filter id="' + id + 'b" x="-.3" y="-.3" width="1.6" height="1.6"><feGaussianBlur stdDeviation="10"/></filter><filter id="' + id + 'b2" x="-.3" y="-.3" width="1.6" height="1.6"><feGaussianBlur stdDeviation="3"/></filter></defs>' +
-    '<rect width="390" height="844" fill="url(#' + id + 'bg)"/>' +
-    '<g filter="url(#' + id + 'b)"><polygon points="120,0 170,0 260,600 40,600" fill="url(#' + id + 'bm)"/><polygon points="250,0 290,0 400,600 250,600" fill="url(#' + id + 'bm)"/></g>' +
-    '<polygon points="0,600 390,600 390,844 0,844" fill="url(#' + id + 'ice)"/><path d="M0 600 H390" stroke="#bfe0ff" stroke-opacity=".35"/>' + rink +
-    '<path d="M-10 560 Q200 600 410 330" fill="none" stroke="url(#' + id + 'sw)" stroke-width="22" stroke-linecap="round" filter="url(#' + id + 'b2)" opacity=".85"/>' +
-    '<path d="M-10 560 Q200 600 410 330" fill="none" stroke="#e9f7ff" stroke-width="2" opacity=".9"/>' +
-    D.nest(stackedLogo(), 15, 215, 360, 500/640) +
-    '<path d="M290 618 L390 600 L390 690 L290 668Z" fill="url(#' + id + 'tr)" opacity=".45" filter="url(#' + id + 'b2)"/>' + sparks +
-    '<g transform="rotate(-6 250 650)">' + D.nest(D.puck(), 180, 600, 130, .7) + "</g>" +
-    '<g><circle cx="128" cy="232" r="34" fill="url(#' + id + 'fl)"/><path d="M68 232 L128 230.6 L188 232 L128 233.4Z M128 196 L129.2 232 L128 268 L126.8 232Z" fill="#fff"/></g>' +
-    '<text class="press" x="195" y="760" text-anchor="middle" font-family="Michroma, Arial, sans-serif" font-size="17" letter-spacing="7" fill="#ffd36a">PRESS START</text>' +
-    '<text x="195" y="800" text-anchor="middle" font-family="Michroma, Arial, sans-serif" font-size="7.5" letter-spacing="2" fill="#7f97b3">© 2026 FELIX · ALEJANDRO · MARTIJN · MCJESUS</text></svg>';
-}
 function flash(){ const f = document.getElementById("p26flash"); if(!f || reduced()) return; f.classList.remove("go"); void f.offsetWidth; f.classList.add("go"); }
 let booting = false;
+/* the title screen: layered (app/p26/boot26.js) so it fits a phone, a tablet and a
+   wide screen. The intro (beams, stick, puck, spray, logo slam, glint) is CSS on .p26-boot */
 function boot(){
   const h = (location.hash || "#home").slice(1);
   let seen = false; try { seen = sessionStorage.getItem("puck.booted") === "1"; } catch(e){}
-  if(seen || (h && h !== "home")) return;
+  const pre = () => document.documentElement.classList.remove("p26-pre");
+  if(seen || (h && h !== "home")){ pre(); return; }
   try { sessionStorage.setItem("puck.booted", "1"); } catch(e){}
   booting = true;
   const b = document.createElement("button");
   b.className = "p26-boot"; b.type = "button"; b.setAttribute("aria-label", "Press start");
-  b.innerHTML = bootScene();
+  b.innerHTML = P.p26boot.scene(stackedLogo(), stackedLogo());
   document.body.appendChild(b);
+  document.documentElement.classList.add("p26-booting"); pre();
   b.focus({ preventScroll: true });
-  b.addEventListener("click", () => { booting = false; b.remove(); flash(); });
+  P.p26boot.start(b);
+  let gone = false;
+  b.addEventListener("click", () => {
+    if(gone) return; gone = true; booting = false;
+    flash(); document.documentElement.classList.remove("p26-booting");
+    if(reduced()){ b.remove(); return; }
+    b.classList.add("out"); setTimeout(() => b.remove(), 420);
+    entrance();
+  });
+}
+/* after PRESS START: the header, the Play screen and the footer come in */
+function entrance(){
+  if(reduced()) return;
+  const top = document.getElementById("p26top"), foot = document.getElementById("p26foot");
+  run([...top.children], { y: -16, dur: 560, gap: 90, delay: 140 });
+  run(items(), { y: 26, dur: 560, gap: 60, delay: 240 });
+  run([foot], { y: 40, dur: 560, delay: 320 });
 }
 
 /* ---------- header and footer ---------- */
@@ -113,22 +108,136 @@ function shell(){
   top.innerHTML = '<a class="lg" href="#home" aria-label="PUCK 26, back to Play">' + headLogo() + "</a>" +
     '<nav class="p26-tabs" aria-label="Sections"><button class="sh" type="button" data-sh="-1" aria-label="Previous tab">LB</button>' +
     TABS.map(([t, h]) => '<a href="' + h + '" data-tab="' + t + '">' + t.toUpperCase() + "</a>").join("") +
-    '<button class="sh" type="button" data-sh="1" aria-label="Next tab">RB</button></nav>';
+    '<button class="sh" type="button" data-sh="1" aria-label="Next tab">RB</button><i class="ul" aria-hidden="true"></i></nav>';
   foot.innerHTML = '<div class="p26-ticker" aria-hidden="true"><b>NHL FACTS</b><span>' + FACTS + FACTS + "</span></div>" +
     '<div class="p26-hints"><button type="button" data-hint="a">' + ab("A") + 'SELECT</button><button type="button" data-hint="b">' + ab("B") + 'BACK</button><button type="button" data-hint="y">' + ab("Y") + "POOL</button></div>";
   top.querySelectorAll("[data-sh]").forEach(b => b.addEventListener("click", () => shiftTab(+b.dataset.sh)));
   foot.querySelector('[data-hint="a"]').addEventListener("click", () => { if(cur === "home") startMode(sel()); });
   foot.querySelector('[data-hint="b"]').addEventListener("click", () => { location.hash = "#home"; });
   foot.querySelector('[data-hint="y"]').addEventListener("click", () => { location.hash = "#pool"; });
+  /* the arena around the column on wide screens, and the wipe used between screens */
+  document.body.insertBefore(P.p26boot.arena(), document.body.firstChild);
+  const w = document.createElement("div");
+  w.className = "p26-wipe"; w.setAttribute("aria-hidden", "true");
+  w.innerHTML = '<i class="pn"><span>' + headLogo() + "</span></i>";
+  document.body.appendChild(w);
+  window.addEventListener("resize", () => underline(false));
+  if(document.fonts && document.fonts.ready) document.fonts.ready.then(() => underline(false));
+  const pre = () => P.p26rain.preload();
+  if("requestIdleCallback" in window) requestIdleCallback(pre, { timeout: 2500 }); else setTimeout(pre, 1500);
 }
-let cur = "home";
+let cur = null, prev = null;
 function route(name){
-  cur = name;
+  prev = cur; cur = name;
   const tab = TAB_OF[name];
   document.body.classList.toggle("p26-tab", !!tab);
   document.body.classList.toggle("p26-game", !tab);
   document.querySelectorAll(".p26-tabs [data-tab]").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
-  closeLoad();
+  underline(!!TAB_OF[prev]);
+  closeLoad(true);
+}
+/* the gold line under the active tab glides to it */
+function underline(glide){
+  const nav = document.querySelector(".p26-tabs"), ul = nav && nav.querySelector(".ul"), on = nav && nav.querySelector("a.on");
+  if(!ul || !on || !on.offsetWidth){ if(ul) ul.style.opacity = 0; return; }
+  if(!glide || reduced()) ul.style.transition = "none";
+  ul.style.opacity = 1;
+  ul.style.transform = "translate(" + on.offsetLeft + "px," + (on.offsetTop + on.offsetHeight + 1) + "px) scaleX(" + on.offsetWidth + ")";
+  if(!glide || reduced()){ void ul.offsetWidth; ul.style.transition = ""; }
+}
+
+/* ---------- screen transitions ----------
+   app.js route() asks leave(next) how long to wait (the wipe closing), renders, then
+   calls enter(next). Tabs slide sideways by direction with their content staggered,
+   a game opens out of the loading screen, leaving a game is a skewed wipe. Every new
+   route cancels what is still running, so quick tab switching never queues up. */
+let anims = [], wipeT = 0, fromLoad = false, mo = null;
+const isTab = k => !!TAB_OF[k];
+const TAB_I = k => TABS.findIndex(([t]) => t === TAB_OF[k]);
+function stopAll(){ anims.forEach(a => { try { a.cancel(); } catch(e){} }); anims = []; if(mo){ mo.disconnect(); mo = null; } }
+function run(els, o){
+  if(reduced() || !els) return;
+  const ease = "cubic-bezier(.16,1,.3,1)";
+  [...els].slice(0, 14).forEach((el, i) => {
+    if(!el || !el.animate) return;
+    const tf = (o.x ? "translateX(" + o.x + "px) " : "") + (o.y ? "translateY(" + o.y + "px) " : "") + (o.s ? "scale(" + o.s + ")" : "");
+    const a = el.animate([{ opacity: o.o == null ? 0 : o.o, transform: tf || "none" }, { opacity: 1, transform: "none" }],
+      { duration: o.dur || 380, delay: (o.delay || 0) + Math.min(i, 9)*(o.gap || 0), easing: ease, fill: "backwards" });
+    anims.push(a);
+    a.onfinish = () => { const k = anims.indexOf(a); if(k >= 0) anims.splice(k, 1); };
+  });
+}
+/* what to stagger: the screen's top-level blocks (one level into a wrapper) */
+function items(){
+  const app = document.getElementById("app"), out = [];
+  const flat = el => [...el.children].forEach(c => {
+    if(out.length > 14) return;
+    if(c.matches(".p26-play,.gx,.wrap,.p26-sec,.fo,.stack,form") && !c.matches(".card,.game,.frame") && c.children.length) flat(c);
+    else if(getComputedStyle(c).position !== "fixed") out.push(c);
+  });
+  if(app) flat(app);
+  return out;
+}
+function wipe(dir, phase){
+  const w = document.querySelector(".p26-wipe"); if(!w || reduced()) return;
+  clearTimeout(wipeT);
+  w.dataset.dir = dir < 0 ? "l" : "r";
+  w.classList.remove("cover", "open"); void w.offsetWidth;
+  w.classList.add(phase);
+  if(phase === "open") wipeT = setTimeout(() => w.classList.remove("open"), 560);
+}
+function leave(next){
+  stopAll();
+  fromLoad = !!document.querySelector(".p26-load.done");
+  if(reduced() || booting || cur === null || next === cur) return 0;
+  if(document.querySelector(".p26-load")) return 0;
+  /* out of a game to a tab, or straight into a game from a tab (a link, not the menu): the wipe */
+  if(!isTab(cur) && isTab(next)){ wipe(-1, "cover"); return 210; }
+  if(isTab(cur) && !isTab(next)){ wipe(1, "cover"); return 210; }
+  return 0;
+}
+const depth = k => k === "list" ? 2 : 1;
+function enter(next){
+  const was = prev, w = document.querySelector(".p26-wipe");
+  const wiping = w && w.classList.contains("cover");
+  if(wiping) wipe(w.dataset.dir === "l" ? -1 : 1, "open");
+  if(reduced() || booting) return;
+  if(fromLoad){ fromLoad = false; run(items(), { y: 34, s: .97, o: .2, dur: 600, gap: 55 }); return; }
+  if(was === null){ run(items(), { y: 18, dur: 460, gap: 45 }); return; }
+  if(isTab(next) && isTab(was)){
+    if(next === was) return;
+    const d = Math.sign(TAB_I(next) - TAB_I(was)) || 1;
+    run(items(), { x: 30*d, dur: 440, gap: 38 });
+    watch();
+    return;
+  }
+  if(isTab(next)){
+    const top = document.getElementById("p26top"), foot = document.getElementById("p26foot");
+    run([...top.children], { y: -12, dur: 480, gap: 60, delay: 60 });
+    run(items(), { x: -30, dur: 500, gap: 40, delay: 100 });
+    run([foot], { y: 30, dur: 480, delay: 140 });
+    watch();
+    return;
+  }
+  /* game to game: deeper slides in from the right, back up from the left */
+  const d = was === next ? 0 : (was === "list" && next === "lists") || (was === next) ? -1 : depth(next) >= depth(was) ? 1 : -1;
+  run(items(), d ? { x: 30*d, dur: 440, gap: 40, delay: wiping ? 80 : 0 } : { y: 14, dur: 380, gap: 35 });
+}
+/* tabs fill in after their data loads (Pool, Table): stagger those blocks in too */
+function watch(){
+  const app = document.getElementById("app"); if(!app || !window.MutationObserver) return;
+  const t0 = Date.now();
+  const obs = new MutationObserver(list => {
+    if(Date.now() - t0 > 2500){ obs.disconnect(); if(mo === obs) mo = null; return; }
+    const els = [];
+    list.forEach(m => m.addedNodes.forEach(n => {
+      if(n.nodeType !== 1 || n.closest(".p26-menu,.preview,#poolslot") || n.offsetHeight < 24) return;
+      els.push(...(n.matches(".stack,.rows,.rules") && n.children.length ? n.children : [n]));
+    }));
+    if(els.length) run(els.slice(0, 10), { y: 16, dur: 420, gap: 45 });
+  });
+  obs.observe(app, { childList: true, subtree: true });
+  mo = obs;
 }
 function shiftTab(d){
   const i = Math.max(0, TABS.findIndex(([t]) => t === (TAB_OF[cur] || "play")));
@@ -150,18 +259,21 @@ try { selI = +localStorage.getItem("puck.sel") || 0; } catch(e){}
 const sel = () => modes()[Math.min(selI, modes().length - 1)];
 function previewHTML(m, i){
   return '<div class="in" style="--bg:' + m.bg + '"><span class="big">' + esc(m.big) + "</span></div>" +
-    (m.face ? '<img class="who" src="' + face(m.face) + '" alt="">' : "") +
+    (m.face ? '<img class="who" src="' + face(m.face) + '" alt=""' + (m.fit ? ' style="' + m.fit + '"' : "") + ">" : "") +
     '<div class="txt"><small>MODE ' + String(i + 1).padStart(2, "0") + " · " + esc(m.tag.toUpperCase()) + "</small><h3>" + esc(m.name) + "</h3><p>" + esc(m.text) + "</p>" +
     '<button class="playa" type="button" data-play>' + ab("A") + "PLAY</button></div>";
 }
 function play(app){
   const ms = modes(); selI = Math.min(selI, ms.length - 1);
   app.innerHTML = '<div class="p26-play">' +
-    '<a class="strip" href="#pool" id="strip"><span class="k">THE<br>POOL</span><span class="vs"><span class="clk" style="font-size:2.6cqw;color:var(--mist);text-shadow:none">LOADING…</span></span><span class="clk"></span><span class="go">►</span></a>' +
+    '<div id="poolslot"><a class="strip" href="#pool" id="strip"><span class="k">THE<br>POOL</span><span class="vs"><span class="clk" style="font-size:2.6cqw;color:var(--mist);text-shadow:none">LOADING…</span></span><span class="clk"></span><span class="go">►</span></a></div>' +
     '<div class="preview" id="pv">' + previewHTML(ms[selI], selI) + "</div>" +
     '<div class="p26-menu" role="listbox" aria-label="Modes">' + ms.map((m, i) => '<button class="item' + (i === selI ? " sel" : "") + '" type="button" role="option" aria-selected="' + (i === selI) + '" data-i="' + i + '"><span>' + esc(m.name) + "</span><em>" + esc(m.tag.toUpperCase()) + "</em></button>").join("") + "</div></div>";
   app.querySelectorAll(".item").forEach(el => el.addEventListener("click", () => { const i = +el.dataset.i; i === selI ? startMode(ms[i]) : select(i); }));
   wirePlay();
+  /* the Pool owns the top of Play: app/pool/pool.js can set PUCK.poolHome(el) to draw
+     its own block in #poolslot (cleanup through PUCK.ui.onLeave); otherwise the strip */
+  if(typeof P.poolHome === "function"){ try { P.poolHome(document.getElementById("poolslot")); return; } catch(e){ console.error(e); } }
   fillStrip();
 }
 function wirePlay(){ const p = document.querySelector("#pv [data-play]"); if(p) p.addEventListener("click", () => startMode(sel())); }
@@ -190,21 +302,34 @@ async function fillStrip(){
   } catch(e){ const v = s.querySelector(".vs"); if(v) v.innerHTML = '<span class="clk" style="font-size:2.6cqw;color:var(--mist);text-shadow:none">OFFLINE</span>'; }
 }
 
-/* ---------- loading screen, then the real mode ---------- */
-let loadT = 0;
-function closeLoad(){ clearTimeout(loadT); const l = document.querySelector(".p26-load"); if(l) l.remove(); }
+/* ---------- loading screen: the 32 logos rain down and pile up, then the real mode ---------- */
+let loadT = 0, rain = null;
+function closeLoad(soft){
+  clearTimeout(loadT);
+  if(rain){ const r = rain; rain = null; setTimeout(() => r.stop(), soft ? 420 : 0); }
+  document.querySelectorAll(".p26-load").forEach(l => {
+    if(l.classList.contains("out")) return;
+    if(reduced()){ l.remove(); return; }
+    l.classList.add("out", soft && l.classList.contains("done") ? "go" : "cancel");
+    setTimeout(() => l.remove(), soft ? 420 : 200);
+  });
+}
 function startMode(m){
   if(!m) return;
   closeLoad();
-  const dur = reduced() ? 400 : 2000, i = modes().indexOf(m);
+  const dur = reduced() ? 500 : 2000, i = modes().indexOf(m);
   const L = document.createElement("div");
   L.className = "p26-load"; L.setAttribute("role", "dialog"); L.setAttribute("aria-label", "Loading " + m.name);
-  L.innerHTML = '<div class="box" style="--dur:' + dur + 'ms"><div class="art">' + (m.face ? '<img src="' + face(m.face) + '" alt="">' : '<span class="glyph">' + esc(m.big) + "</span>") + "</div>" +
-    "<h3>" + esc(m.name) + '</h3><p class="tip"><b>TIP · </b>' + TIPS[Math.max(0, i) % TIPS.length] + "</p>" +
-    '<div class="lbl"><span>LOADING</span><span>' + ab("B") + " BACK</span></div><div class=\"bar\"><i></i></div></div>";
+  L.style.setProperty("--dur", dur + "ms"); L.style.setProperty("--bg", m.bg);
+  L.innerHTML = '<div class="ld-beams" aria-hidden="true"><i></i><i></i><i></i></div>' +
+    '<div class="ld-rain" aria-hidden="true"><span class="ld-big">' + esc(m.big) + '</span><canvas></canvas><i class="ld-ice"></i></div>' +
+    '<div class="box"><small>MODE ' + String(Math.max(0, i) + 1).padStart(2, "0") + " · " + esc(m.tag.toUpperCase()) + "</small><h3>" + esc(m.name) + "</h3>" +
+    '<p class="tip"><b>TIP · </b>' + TIPS[Math.max(0, i) % TIPS.length] + "</p>" +
+    '<div class="lbl"><span>LOADING<em></em></span><span>' + ab("B") + ' BACK</span></div><div class="bar"><i></i></div></div>';
   document.body.appendChild(L);
-  L.addEventListener("click", closeLoad);
-  loadT = setTimeout(() => { L.remove(); location.hash = "#" + m.id; }, dur + 80);
+  rain = P.p26rain.run(L.querySelector("canvas"), { hero: m.team || "NHL", seed: i + 1 });
+  L.addEventListener("click", () => closeLoad());
+  loadT = setTimeout(() => { L.classList.add("done"); location.hash = "#" + m.id; }, dur + 60);
 }
 
 /* ---------- keyboard: ↑ ↓ move, Enter plays, Q/E switch tabs, Esc backs out ---------- */
@@ -223,5 +348,5 @@ document.addEventListener("keydown", e => {
   else if(cur === "home" && e.key === "Enter" && !(t && t.closest && t.closest("button,a"))){ e.preventDefault(); startMode(sel()); }
 });
 
-P.p26 = { shell, boot, route, play, startMode, clock, MODES };
+P.p26 = { shell, boot, route, leave, enter, play, startMode, clock, MODES };
 })();
