@@ -50,7 +50,8 @@ async function pool(){
   const me = await P.store.me();
   let feed, picks, players;
   try { [feed, picks, players] = await Promise.all([P.nhl.poolGames(), P.store.picks(), P.store.players()]); }
-  catch(e){ box.innerHTML = '<p class="err">' + (/puck_|schema cache/.test(e.message) ? "The Pool isn't set up in Supabase yet: run <b>supabase/schema.sql</b> in the SQL editor (README step 1)."
+  catch(e){ box.innerHTML = '<p class="err">' + (/permission denied/i.test(e.message) ? "Supabase won't let the app read the Pool's tables: run the three <b>grant</b> lines at the end of <b>supabase/schema.sql</b> in the SQL editor."
+    : /schema cache|does not exist/i.test(e.message) ? "The Pool isn't set up in Supabase yet: run <b>supabase/schema.sql</b> in the SQL editor (README step 1)."
     : /NHL feed|fetch/i.test(e.message) ? "Can't reach the NHL feed: " + esc(e.message) + ". On your computer, run <b>node server/serve.js</b> and open the address it prints."
     : "Couldn't load the Pool: " + esc(e.message)) + "</p>"; return; }
   const games = feed.games, now = Date.now();
@@ -199,9 +200,9 @@ async function me(){
     let signup = false;
     $("#sw").addEventListener("click", () => { signup = !signup; $("#fname").hidden = $("#fcode").hidden = !signup; $("#ftitle").textContent = go.textContent = signup ? "Create account" : "Sign in"; $("#sw").textContent = signup ? "I have an account" : "New here? Create an account"; });
     go.addEventListener("click", async () => {
-      const err = $("#ferr"); err.hidden = true; go.disabled = true;
+      const err = $("#ferr"); err.hidden = true; err.className = "err"; go.disabled = true;
       try {
-        if(signup){ const r = await P.store.signUp($("#em").value.trim(), $("#pw").value, $("#nm").value.trim() || "Me", $("#cd").value); if(!r.session){ err.hidden = false; err.textContent = "Check your email to confirm, then sign in."; go.disabled = false; return; } }
+        if(signup){ const r = await P.store.signUp($("#em").value.trim(), $("#pw").value, $("#nm").value.trim() || "Me", $("#cd").value); if(!r.session){ err.hidden = false; err.className = "note"; err.textContent = "Account made. Check your email (and spam) to confirm, then sign in. No email? Ask Martijn to confirm you in Supabase."; go.disabled = false; return; } }
         else await P.store.signIn($("#em").value.trim(), $("#pw").value);
         location.hash = "#pool";
       } catch(e){ err.hidden = false; err.textContent = e.message; go.disabled = false; }
