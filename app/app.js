@@ -2,7 +2,7 @@
    register a cleanup (the rink, timers) that runs when you leave it. */
 (function(){
 const P = window.PUCK, C = window.PUCK_CONFIG, S = P.scoring;
-const app = document.getElementById("app"), tabbar = document.getElementById("tabbar");
+const app = document.getElementById("app");
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -32,50 +32,20 @@ async function route(){
   const [name, arg] = h.split(/-(.+)/);
   const plug = P.games.find(g => g.id === name);
   const fn = name === "list" ? listPlay : plug ? plug.render : ROUTES[name] || home;
-  const tab = { home: "home", faceoff: "home", lists: "home", list: "home", pool: "pool", table: "table", me: "me" }[name] || "home";
-  $$("a", tabbar).forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
+  /* PUCK 26 shell (app/p26/p26.js): tabs, which chrome shows, closes the loading screen */
+  P.p26.route(fn === home ? "home" : name);
   window.scrollTo(0, 0);
   try { await fn(arg); } catch(err){ console.error(err); app.innerHTML = band("Oops", "", "#home") + '<div class="wrap"><p class="err">' + esc(err.message || err) + "</p></div>"; }
 }
 window.addEventListener("hashchange", route);
 
-/* ---------------- home ---------------- */
-let introPlayed = false;
-async function home(){
-  const me = await P.store.me();
-  app.innerHTML = '<div class="stage"><div class="wrap"><div class="show" id="logo" title="Replay"></div><div class="who">' +
-    (me ? '<span class="chip">Playing as ' + esc(me.name) + "</span>" : '<a class="chip" href="#me">Sign in for the Pool</a>') +
-    (P.store.mode === "demo" ? '<a class="chip" href="#me">Demo mode</a>' : "") + "</div></div></div>" +
-    '<div class="wrap stack" style="margin-top:4px">' +
-      '<div class="card" id="poolcard"><span class="label" style="color:#9fb2c4">The Pool</span><p class="one" style="margin-top:8px">Loading the next game…</p></div>' +
-      '<div class="card light"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2>Faceoff</h2><p class="one">One on one, like BALL. Pass with a right answer, shoot, score.</p></div>' +
-        '<img src="' + P.NHL_LOGO() + '" alt="" width="54" height="54" style="flex:none"></div><a class="pill wide" href="#faceoff" style="margin-top:12px">Play</a></div>' +
-      '<div class="tiles"><a class="tile" href="#lists"><b>Lists</b><span>The last 10 Cup winners, the Original Six, top 10s</span></a>' +
-        '<a class="tile" href="#table"><b>Table</b><span>Who is winning the Pool</span></a>' +
-        P.games.map(g => '<a class="tile" href="#' + g.id + '"><b>' + esc(g.title) + "</b><span>" + esc(g.sub) + "</span></a>").join("") + "</div>" +
-    "</div>";
-  const L = $("#logo"), play = () => { L.innerHTML = P.brand.faceoff(); const l = L.firstChild; void l.offsetWidth; l.classList.add("play"); };
-  if(introPlayed) L.innerHTML = P.brand.faceoff(); else { introPlayed = true; play(); }
-  L.addEventListener("click", play);
-  try {
-    const [{ games }, picks] = await Promise.all([P.nhl.poolGames(), P.store.picks()]);
-    const next = games.find(g => !g.final && !g.live && new Date(g.start) > Date.now()), live = games.find(g => g.live);
-    const g = live || next, card = $("#poolcard");
-    if(!g || !card) return;
-    const mine = me && picks.find(p => p.user === me.id && p.game_id === g.id);
-    card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center"><span class="label" style="color:#9fb2c4">The Pool · ' + (live ? '<span style="color:#ff8a8f">Live</span>' : "Next up") + "</span>" +
-      '<span class="label" style="color:#9fb2c4">' + (live ? "" : "locks in " + until(g.start)) + "</span></div>" +
-      '<div style="display:flex;align-items:center;justify-content:center;gap:14px;margin:12px 0 6px">' + logoImg(g.away.abbr, 54, true) +
-      '<span style="font:900 26px/1 var(--display)">' + (live ? (g.away.score + "–" + g.home.score) : "@") + "</span>" + logoImg(g.home.abbr, 54, true) + "</div>" +
-      '<p class="one" style="text-align:center">' + esc(when(g.start)) + " · " + (mine ? "Your pick: " + mine.away + "–" + mine.home + (mine.ending !== "REG" ? " " + mine.ending : "") : "No pick yet") + "</p>" +
-      '<div style="text-align:center;margin-top:10px"><a class="btn2" href="#pool" style="display:inline-block;text-decoration:none">' + (mine || live ? "Open the Pool" : "Make your pick") + "</a></div>";
-  } catch(e){ const c = $("#poolcard"); if(c) c.innerHTML = '<span class="label" style="color:#9fb2c4">The Pool</span><p class="one" style="margin-top:8px">Can\'t reach the NHL feed right now.</p><a class="btn2" href="#pool" style="display:inline-block;margin-top:10px;text-decoration:none">Open the Pool</a>'; }
-}
+/* ---------------- home: the PUCK 26 Play screen (app/p26/p26.js) ---------------- */
+async function home(){ P.p26.play(app); }
 
 /* ---------------- the Pool ---------------- */
 const ENDS = [["REG", "Regulation"], ["OT", "Overtime"], ["SO", "Shootout"]];
 async function pool(){
-  app.innerHTML = band("The Pool", C.POOL_TEAMS.map(t => P.team(t).name.split(" ").pop()).join(" · ")) + '<div class="wrap" id="pl"><p class="one">Loading games…</p></div>';
+  app.innerHTML = band("The Pool", C.POOL_TEAMS.map(t => P.team(t).name.split(" ").pop()).join(" · ")) + '<p class="p26-lbl">THE POOL · ' + C.POOL_TEAMS.map(t => P.team(t).name.split(" ").pop().toUpperCase()).join(" · ") + '</p><div class="wrap" id="pl"><p class="one">Loading games…</p></div>';
   const box = $("#pl");
   const me = await P.store.me();
   let feed, picks, players;
@@ -99,7 +69,7 @@ async function pool(){
 
   function gameCard(g, kind){
     let ps = picks.filter(p => p.game_id === g.id); const mine = me && ps.find(p => p.user === me.id);
-    const top = '<div class="top"><span>' + esc(when(g.start)) + "</span>" + (kind === "open" ? '<span class="lock">Locks in ' + until(g.start) + "</span>" :
+    const top = '<div class="top"><span>' + esc(when(g.start)) + "</span>" + (kind === "open" ? '<span class="lock">LOCKS IN <b class="clk" data-until="' + g.start + '">' + P.p26.clock(g.start) + "</b></span>" :
       kind === "live" ? '<span class="live">Live' + (g.period ? " · P" + g.period : "") + "</span>" : "<span>Final" + (g.ending && g.ending !== "REG" ? " · " + g.ending : "") + "</span>") + "</div>";
     const side = (t, tag) => '<div class="side">' + logoImg(t.abbr, 58) + "<b>" + esc(t.abbr) + "</b><small>" + tag + "</small></div>";
     if(kind === "open"){
@@ -173,16 +143,18 @@ async function pool(){
 
 /* ---------------- the table ---------------- */
 async function table(){
-  app.innerHTML = band("Table", "Season " + seasonLabel()) + '<div class="wrap" id="tb"><p class="one">Adding it up…</p></div>';
+  app.innerHTML = band("Table", "Season " + seasonLabel()) + '<p class="p26-lbl">THE POOL · SEASON ' + seasonLabel() + '</p><div class="wrap" id="tb"><p class="one">Adding it up…</p></div>';
   const box = $("#tb");
   let games, picks, players;
   try { [{ games }, picks, players] = await Promise.all([P.nhl.poolGames(), P.store.picks(), P.store.players()]); }
   catch(e){ box.innerHTML = '<p class="err">' + esc(e.message) + "</p>"; return; }
   const rows = S.table(games, picks.filter(p => !p.hidden), players, P.SCORING);
   const doneN = games.filter(g => g.final).length;
-  box.innerHTML = '<table class="lt"><thead><tr><th>#</th><th>Player</th><th title="Right winners">W</th><th title="Exact scores">Ex</th><th title="OT and shootout calls">OT</th><th>Pts</th></tr></thead><tbody>' +
-    rows.map((r, i) => "<tr><td>" + (i + 1) + "</td><td>" + esc(r.name) + '<div class="form" style="justify-content:flex-start;margin-top:5px">' + r.form.map(x => '<i class="' + (x >= 5 ? "g" : x > 0 ? "b" : "") + '">' + x + "</i>").join("") + "</div></td><td>" + r.winners + "</td><td>" + r.exact + "</td><td>" + r.calls + '</td><td class="pts">' + r.pts + "</td></tr>").join("") +
-    '</tbody></table><p class="one" style="margin-top:8px">' + doneN + " finished games so far. Ties are split on exact scores, then right winners.</p>" +
+  const anyPts = rows.some(r => r.pts > 0);
+  box.innerHTML = (rows.length ? '<div class="rows">' + rows.map((r, i) => '<div class="rowx' + (i === 0 && anyPts ? " lead" : "") + '"><i>' + (anyPts ? i + 1 : "–") + "</i><div><b>" + esc(r.name) + "</b><small>" + r.winners + " WINNERS · " + r.exact + " EXACT · " + r.calls + " OT CALLS</small>" +
+      (r.form.length ? '<div class="form">' + r.form.map(x => '<i class="' + (x >= 5 ? "g" : x > 0 ? "b" : "") + '">' + x + "</i>").join("") + "</div>" : "") + "</div><span><strong>" + r.pts + "</strong> PTS</span></div>").join("") + "</div>"
+      : '<p class="note">' + (P.store.mode === "online" ? 'Sign in on <a href="#me">Me</a> to see the table.' : "No players yet.") + "</p>") +
+    '<p class="one" style="margin-top:8px">' + (doneN ? doneN + " finished games so far. Ties are split on exact scores, then right winners." : "The table fills up after the first Pool game.") + "</p>" +
     '<div class="sectitle"><h2>How points work</h2></div><div class="rules">' +
     [["Right winner", P.SCORING.winner], ["Exact score, on top of the winner", P.SCORING.exact], ["Right winner and goal difference (not exact)", P.SCORING.diff],
      ["Called overtime or the shootout, and it went there", P.SCORING.ending], ["… and you had the winner too", P.SCORING.endingWinner],
