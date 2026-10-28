@@ -1,5 +1,5 @@
 /* PUCK Faceoff sounds: all made on the spot with WebAudio, no files.
-   P.sfx.play(name) for: pass, catch, right, wrong, tick, whistle, shot, horn, save, post, steal, big.
+   P.sfx.play(name) for: pass, catch, right, wrong, tick, whistle, shot, horn, save, post, steal, big, heat, swoosh.
    P.sfx.on (true/false) is remembered on this phone; the first tap anywhere wakes the audio up
    (browsers keep it asleep until someone touches the page). */
 (function(){
@@ -61,7 +61,11 @@ const SOUNDS = {
   save(t){ tone(85, t, .18, { vol: .45, to: 55 }); noise(t, .1, { f: 600, q: 1, vol: .3 }); noise(t + .08, 1.3, { f: 500, q: .7, vol: .12, attack: .2 }); },
   steal(t){ noise(t, .06, { f: 1400, q: 2, vol: .4 }); tone(240, t, .2, { type: 'triangle', vol: .12, to: 140 }); },
   /* a big moment: breakaway, one-timer, hat trick */
-  big(t){ [523, 659, 784, 1046].forEach((f, i) => tone(f, t + i*.07, .28, { type: 'triangle', vol: .16 })); noise(t + .1, 1, { f: 900, q: .6, vol: .1, attack: .25 }); }
+  big(t){ [523, 659, 784, 1046].forEach((f, i) => tone(f, t + i*.07, .28, { type: 'triangle', vol: .16 })); noise(t + .1, 1, { f: 900, q: .6, vol: .1, attack: .25 }); },
+  /* on a heater: a quick rising sweep with a crackle on top */
+  heat(t){ tone(330, t, .35, { type: 'sawtooth', vol: .08, lp: 2200, to: 990 }); noise(t + .05, .45, { f: 3800, q: 1.2, vol: .12, attack: .05 }); tone(1320, t + .3, .25, { type: 'triangle', vol: .12 }); },
+  /* the TV replay wipe: a filtered whoosh */
+  swoosh(t){ noise(t, .45, { f: 1400, q: .9, vol: .22, attack: .18 }); tone(220, t, .4, { type: 'sine', vol: .06, to: 660 }); }
 };
 P.sfx = {
   play(name){

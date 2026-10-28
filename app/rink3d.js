@@ -28,7 +28,9 @@ const vig = document.createElement('div'); vig.className = 'vig'; wrap.appendChi
 const tagsEl = document.createElement('div'); tagsEl.className = 'tags'; wrap.appendChild(tagsEl);
 const spotsEl = document.createElement('div'); spotsEl.className = 'spots'; spotsEl.hidden = true; wrap.appendChild(spotsEl);
 const resEl = document.createElement('div'); resEl.className = 'shotres'; resEl.hidden = true;
-resEl.innerHTML = '<i class="mk keep"><b>Goalie</b></i><i class="mk aim"><b>Shot</b></i>'; wrap.appendChild(resEl);
+resEl.innerHTML = '<i class="mk keep"><b>Goalie</b></i><i class="mk aim"><b>Shot</b></i><i class="mk keep k2" hidden><b>Goalie</b></i>'; wrap.appendChild(resEl);
+/* the TV replay: the bug in the corner and letterbox bars */
+const rbug = document.createElement('div'); rbug.className = 'rbug'; rbug.hidden = true; rbug.innerHTML = '<i></i><i></i><b>Replay</b>'; wrap.appendChild(rbug);
 const flash = document.createElement('div'); flash.className = 'flash'; wrap.appendChild(flash);
 /* the camera buttons: broadcast, overhead, behind the puck; and back to broadcast */
 const camui = document.createElement('div'); camui.className = 'camui'; camui.hidden = true;
@@ -691,7 +693,7 @@ function runShot(now, t, dt){
   if(!idle){
     const u0 = shotClock/DUR, inSlow = !reduced() && u0 > K.load - .03 && u0 < K.hit + .015;
     slow += ((inSlow ? 1 : 0) - slow)*(1 - Math.exp(-dt*(inSlow ? 10 : 6)));
-    shotClock += dt*1000*lerp(1, .36, slow);
+    shotClock += dt*1000*lerp(1, .36, slow)*(replaying ? .6 : 1);
   } else slow = Math.max(0, slow - dt*4);
   const u = idle ? 0 : clamp(shotClock/DUR);
   if(!idle && u >= K.shot && !releaseW){ const s = setShooter(K.shot, t, false); releaseW = bladeWorld(SH, s.r); }
@@ -727,8 +729,9 @@ function runShot(now, t, dt){
   const lit = scored && !idle && u > K.hit;
   NN.skin.scale.z = lit ? 1 + Math.max(0, Math.sin(clamp((u - K.hit)/.12)*Math.PI))*.28 : 1;
   if(lit) goalLit = Math.max(goalLit, .2);
-  if(state === 'shoot' && lastHitU < K.hit && u >= K.hit){ if(scored){ goalLit = 3.2; flashRate = 70; } else { GNo.trk.ready = 1; } if(api.onHit) api.onHit(scored, shotSpot); }
+  if(state === 'shoot' && lastHitU < K.hit && u >= K.hit){ if(scored){ goalLit = 3.2; flashRate = replaying ? 20 : 70; } else { GNo.trk.ready = 1; } if(api.onHit && !replaying) api.onHit(scored, shotSpot); }
   lastHitU = u;
+  if(state === 'shoot' && u >= K.end && replaying){ endReplay(); return u; }
   if(state === 'shoot' && u >= K.end){ state = 'result'; showFlash(scored ? 'GOAL' : 'SAVE', scored ? 'goal' : 'save'); resEl.hidden = false; if(resolveShot) resolveShot(); }
   return u;
 }
@@ -754,6 +757,7 @@ const rig = { T: V(0, .4, ZC), D: 15, yaw: 0, el: .56, fov: 46 };
 const usr = { yaw: 0, el: 0, zoom: 1, px: 0, pz: 0, drag: false };
 let view = 'tv', baseEl = .56, ctlEnabled = true;
 let celeYaw = null, shotT = 0, camMode = 'play', camHold = null, celeAt = null, celeT0 = 0, shotBlend = 0;
+let replaying = false, replayRes = null, lastShot = null, celeEnd = null, coverK = [];
 let inT = 0, inB = 0, inTc = 0, inBc = 0, offApplied = NaN;
 let aspect = .8, W_ = 1, H_ = 1;
 const D2R = Math.PI/180;
@@ -980,7 +984,7 @@ function runMatch(dt, t, now, shotOwnsPuck){
   const nSub = Math.min(6, Math.ceil(dt/.034)), hSub = dt/nSub;
   for(const s of skaters()){
     if(shotLive && s === SH) continue;
-    s.root.visible = !(shotLive && shotBlend > .2 && inShotLane(s));
+    s.root.visible = !s.boxed && !replaying && !(shotLive && shotBlend > .2 && inShotLane(s));
     for(let k = 0; k < nSub; k++) steer(s, hSub);
     const ks = s.stopK ? ease(Math.min(1, s.stopK*1.5)) : 0;
     s.root.position.set(s.x, 0, s.z); s.root.rotation.y = s.head + (s.stopSide || 0)*1.15*ks;
@@ -1009,6 +1013,7 @@ function runMatch(dt, t, now, shotOwnsPuck){
     g.hasPuck = !!(carrier && carrier.w === w && carrier.i === 0 && pk.state === 'carry');
     trackGoalie(g, dt);
     g.pose(goaliePose(0, t, true, null, w*1.7, g));
+    if(g.fx && g.fx.scrape && Math.random() < .6) spray(g.fx.scrape.p, g.fx.scrape.dir, 2, .7*g.fx.scrape.n);
   }
   if(carrier && !shotLive && pk.state === 'carry'){ const c = actor(carrier.w, carrier.i); const p = c.goalie ? c.base.localToWorld(V(0, 0, .5)) : V(c.x, 0, c.z); ringC.position.set(p.x, .012, p.z); ringC.scale.setScalar(1 + .06*Math.sin(t*5)); }
   if(ringTarget){ const c = actor(ringTarget.w, ringTarget.i); ringT.position.set(c.x, .012, c.z); ringT.scale.setScalar(1 + .1*Math.sin(t*7)); }
@@ -1047,9 +1052,18 @@ function updateCam(dt, now, shotU){
     key.target.position.set(0, 0, 3); key.position.set(2.5, 16, 10); key.target.updateMatrixWorld();
     return;
   }
+  if(replaying){
+    /* the replay: the reverse angle, high behind the net, the goalie in front and the shooter coming at us */
+    const sd = START[0] >= 0 ? 1 : -1, k = ease(clamp(shotClock/DUR)), port = aspect < 1;
+    cam.position.set(sd*lerp(1.1, .5, k), lerp(2.6, 2.15, k), lerp(-3.1, -2.6, k));
+    cam.lookAt(lerp(START[0], END[0], k)*.55, .45, lerp(port ? 5.4 : 5.8, port ? 2.9 : 3.2, k)); setFov(port ? lerp(56, 50, k) : lerp(34, 30, k));
+    key.target.position.set(0, 0, 3); key.position.set(2.5, 16, 10); key.target.updateMatrixWorld();
+    return;
+  }
   const F = camHold ? camHold.clone() : focusPoint();
   let D, el, yaw = 0, vf;
   if(camMode === 'faceoff'){ vf = vfFor(50, 30); Tt.set(F.x, .4, F.z); el = .42; yaw = .55; D = distFor(aspect < 1 ? 6.4 : 9, vf); }
+  else if(camMode === 'scramble'){ vf = vfFor(52, 32); Tt.set(F.x*.6, .4, F.z + .6); el = .5; yaw = F.x >= 0 ? .4 : -.4; D = distFor(aspect < 1 ? 6.5 : 10, vf); }
   else if(camMode === 'cele' && celeAt){
     vf = vfFor(50, 30); Tt.set(celeAt.x - Math.sin(celeAt.head)*.8, 1.05, celeAt.z - Math.cos(celeAt.head)*.8); el = .2; D = distFor(aspect < 1 ? 5 : 8, vf);
     celeYaw = celeYaw == null ? rig.yaw : celeYaw;
@@ -1064,7 +1078,8 @@ function updateCam(dt, now, shotU){
     } else {
       vf = vfFor(58, 36);
       camF.lerp(V(F.x*.5, 0, clamp(F.z - (aspect < 1 ? 6.5 : 2.5), 4, 48)), 1 - Math.exp(-dt*2.4));
-      Tt.set(camF.x, .4, camF.z); el = aspect < 1 ? .6 : .6; D = distFor(aspect < 1 ? 11.5 : 19, vf);
+      Tt.set(camF.x, .4, camF.z); /* deep in their zone a phone sees mostly crowd over the end boards: look down more steeply there */
+      el = aspect < 1 ? lerp(.82, .6, clamp((camF.z - 4)/9)) : .6; D = distFor(aspect < 1 ? 11.5 : 19, vf);
     }
     baseEl = el;
     yaw += usr.yaw; el = clamp(el + usr.el, .1, 1.42); D *= usr.zoom; Tt.x += usr.px; Tt.z += usr.pz;
@@ -1111,6 +1126,7 @@ function placeTags(){
   const w = W_, h = H_, top = inTc + 8, bot = h - inBc - 8;
   tagList.length = 0;
   for(const [s, b] of tagEls){
+    if(s.boxed){ if(b._vis){ b._vis = false; b.style.display = 'none'; } continue; }
     tmpV.set(s.x, 2.15, s.z).project(cam);
     const behind = tmpV.z > 1;
     let x = (tmpV.x + 1)/2*w, y = (1 - tmpV.y)/2*h, edge = false, vis = true;
@@ -1229,6 +1245,8 @@ function placeSpots(){
 function placeRes(){
   const [kx, ky] = netPx(SPOTS[guess].p), [ax, ay] = netPx(SPOTS[shotSpot].p), [k, a] = resEl.children;
   k.style.left = kx + 'px'; k.style.top = ky + 'px'; a.style.left = ax + 'px'; a.style.top = ay + 'px';
+  const k2 = resEl.children[2], o2 = coverK.find(c => c !== guess);
+  k2.hidden = !o2; if(o2){ const [x2, y2] = netPx(SPOTS[o2].p); k2.style.left = x2 + 'px'; k2.style.top = y2 + 'px'; }
 }
 let onPick = null, resolveShot = null, running = false, raf = 0, ro = null;
 for(const k of Object.keys(SPOTS)){
@@ -1244,6 +1262,8 @@ const wait = ms => new Promise(r => setTimeout(r, reduced() ? Math.min(ms, 500) 
 /* everyone on the ice in a match, only the duel's two in a shootout */
 function setMode(m){
   mode = m;
+  if(replaying) endReplay(); celeEnd = null;
+  for(const s of skaters()) s.boxed = false;
   for(const s of skaters()) s.root.visible = m === 'match';
   SO.root.visible = m === 'shootout' || m === 'show' || m === 'lab';
   for(const w of [0, 1]) A[w][0].base.visible = m === 'match';
@@ -1254,6 +1274,13 @@ function setMode(m){
   camKey = ''; syncCamUI();
 }
 setMode('shootout');
+function endReplay(){
+  if(!replaying) return;
+  replaying = false; shotLive = false; state = 'idle'; rbug.hidden = true; goalLit = 0; flashRate = .9;
+  SH.x = SH.root.position.x; SH.z = SH.root.position.z; SH.vx = SH.vz = 0; SH.tx = SH.x; SH.tz = SH.z;
+  SH = SO; pk.state = 'rest';
+  const r = replayRes; replayRes = null; if(r) setTimeout(r, 120);
+}
 /* ===================================== THE API ===================================== */
 const api = {
   SPOTS,
@@ -1284,17 +1311,26 @@ const api = {
   /* the old call, still honoured */
   setKits(sh, go){ api.shootout({ team: sh.team || 'MTL', name: sh.name, number: sh.number, shoots: sh.shoots }, { team: go.team || 'EDM', name: go.name, number: go.number }); },
   /* show the five spots; cb(spotKey) on a tap */
-  pick(cb){ onPick = cb; scored = false; flash.className = 'flash'; spotsEl.hidden = false; resEl.hidden = true; state = 'pick'; },
+  pick(cb, taken){ onPick = cb; scored = false; flash.className = 'flash'; spotsEl.hidden = false; resEl.hidden = true; state = 'pick';
+    for(const b of spotsEl.children){ const t = !!(taken && taken.includes(b.dataset.k)); b.classList.toggle('taken', t); b.disabled = t; } },
   hold(){ state = 'idle'; spotsEl.hidden = true; resEl.hidden = true; if(!shotLive) flash.className = 'flash'; },
   /* play one attempt; resolves a moment after GOAL or SAVE shows */
   shoot(o){
-    shotSpot = o.spot; scored = !!o.scored; guess = o.guess || o.spot; hitW = null;
+    shotSpot = o.spot; scored = !!o.scored; guess = o.guess || o.spot; hitW = null; coverK = o.cover || [guess];
+    lastShot = mode === 'match' && shotLive ? { sh: SH, START: START.slice(), END: END.slice(), kind: shotKind, spot: shotSpot, guess, scored } : null;
     releaseW = null; oneAt = null; padSprayed = false; lastU = 0; lastHitU = 0; shotClock = 0; spotsEl.hidden = true; resEl.hidden = true; flash.className = 'flash';
     resEl.classList.toggle('same', shotSpot === guess);
     state = 'shoot'; shotT0 = performance.now();
     return new Promise(res => { resolveShot = () => { resolveShot = null; setTimeout(res, reduced() ? 500 : 950); }; });
   },
   flash: showFlash,
+  /* a tap while the play runs: the replay or the celebration ends, a shot jumps to the moment it gets there */
+  skip(){
+    if(replaying){ endReplay(); return true; }
+    if(celeEnd){ celeEnd(); return true; }
+    if(state === 'shoot' && shotClock < (K.hit - .03)*DUR){ shotClock = (K.hit - .03)*DUR; return true; }
+    return false;
+  },
   /* the part of the canvas the HUD covers, top and bottom, in CSS pixels: the picture centres in the rest */
   insets(top, bottom){ inT = Math.max(0, top || 0); inB = Math.max(0, bottom || 0); wrap.style.setProperty('--inT', inT + 'px'); wrap.style.setProperty('--inB', inB + 'px'); },
   /* draw calls and triangles of the last frame, for keeping an eye on phones */
@@ -1318,7 +1354,8 @@ const api = {
       if(!paintHome()) logoWait.push(function once(){ if(!paintHome()) logoWait.push(once); });
       const k0 = kitOf(T[0].abbr), k1 = kitOf(T[1].abbr);
       paintCrowd([k0.b, k0.b, (k0.n && k0.n[1]) || '#ffffff', k0.b, k1.b, '#e8eef3']);
-      clearHats(); cubeBig = '';
+      clearHats(); cubeBig = ''; lastShot = null;
+      if(replaying) endReplay(); celeEnd = null; for(const s of skaters()) s.boxed = false;
       setTags();
     },
     /* everyone to these spots, given in each side's own attacking frame (attacking z = 0).
@@ -1432,6 +1469,57 @@ const api = {
       pk.at.copy(puck.position); pk.state = 'rest';
       SH = SO; flash.className = 'flash';
     },
+    /* a man in the penalty box (b = { w, i }), or null for everyone back on */
+    box(b){ for(const s of skaters()) s.boxed = !!(b && s.w === b.w && s.i === b.i); setTags(); },
+    /* a rebound: the puck loose where the save left it, w's man i crashing the net, the other side's dm coming back to clear */
+    scramble(w, i, dm){
+      const p = puck.position.clone(); p.y = .013;
+      p.x = clamp(p.x, -HX + 1.5, HX - 1.5); p.z = clamp(p.z, .9, 9);
+      const a = actor(w, i), dd = actor(1 - w, dm);
+      for(const s of skaters()) s.follow = null;
+      a.tx = p.x + (a.x >= p.x ? .55 : -.55); a.tz = p.z + 1; a.vmax = 10; a.acc = 18; a.mode = 'idle'; a.face = { x: p.x, z: p.z };
+      dd.tx = p.x*.6; dd.tz = Math.max(.9, p.z - .9); dd.vmax = 10; dd.acc = 18; dd.mode = 'idle'; dd.face = { x: p.x, z: p.z };
+      carrier = null; pk.state = 'rest'; pk.at.copy(p);
+      camMode = 'scramble'; camHold = p.clone(); ringTarget = null; setTags();
+    },
+    /* the rebound settled: o = { w, i, scored, d, dm }. Buried in the net, or swept up by their man */
+    putBack(o){
+      return new Promise(res => {
+        const a = actor(o.w, o.i), dd = actor(o.d, o.dm), sx = puck.position.x >= 0 ? -1 : 1;
+        const go = () => {
+          const from = puck.position.clone(); from.y = .013;
+          if(o.scored){
+            a.mode = 'lunge'; a.t0 = performance.now();
+            const to = V(sx*(.45 + Math.random()*.25), .1 + Math.random()*.35, -.45);
+            Object.assign(pk, { state: 'fly', t0: performance.now(), dur: reduced() ? 120 : 280, spin: 22, lift: .12 }); pk.from.copy(from); pk.to.copy(to);
+            spray(from, V(to.x - from.x, 0, to.z - from.z).normalize(), 10, 1.4);
+            if(api.onPass) api.onPass(true);
+            pk.done = () => { goalLit = 3.2; flashRate = 70; showFlash('GOAL', 'goal', 1500); A[o.d][0].trk.slump = 2.6; if(api.onHit) api.onHit(true, 'reb'); setTimeout(res, reduced() ? 300 : 900); };
+          } else {
+            dd.mode = 'lunge'; dd.t0 = performance.now();
+            const to = V(dd.x - .5, .013, dd.z - .6);
+            Object.assign(pk, { state: 'fly', t0: performance.now(), dur: 240, spin: 16, lift: 0 }); pk.from.copy(from); pk.to.copy(to);
+            spray(from, V(0, 0, -1), 8, 1.2);
+            pk.done = () => { carrier = { w: o.d, i: o.dm }; pk.state = 'carry'; dd.mode = 'carry'; dd.cushT = performance.now(); if(api.onCatch) api.onCatch(false); setTimeout(res, reduced() ? 150 : 450); };
+          }
+        };
+        setTimeout(go, reduced() ? 100 : 350);
+      });
+    },
+    /* the TV replay of the last goal from the far corner, slowed down; resolves when it's done or skipped */
+    replay(){
+      const L = lastShot;
+      if(!L || !L.scored || mode !== 'match') return Promise.resolve();
+      return new Promise(res => {
+        SH = L.sh; GNo = A[1 - att][0]; START = L.START; END = L.END; shotKind = L.kind; shotSpot = L.spot; guess = L.guess; scored = true;
+        hitW = null; releaseW = null; oneAt = null; padSprayed = true; slow = 0;
+        shotClock = (L.kind === 'brk' ? .22 : .32)*DUR; lastU = shotClock/DUR; lastHitU = lastU;
+        Object.assign(GNo.trk, { cele: 0, slump: 0 });
+        SH.root.visible = true;
+        shotLive = true; replaying = true; replayRes = res; state = 'shoot'; shotT0 = performance.now();
+        flash.className = 'flash'; spotsEl.hidden = true; resEl.hidden = true; rbug.hidden = false; setTags();
+      });
+    },
     /* the goalie covers it */
     toGoalie(w){ carrier = { w, i: 0 }; pk.state = 'carry'; setTags(); },
     /* the final horn: the winning goalie's arms go up, the other one's head goes down (abbr = the winners) */
@@ -1450,7 +1538,11 @@ const api = {
         else { o.tx = o.x*.7; o.tz = o.z + 4; o.vmax = 3; o.face = null; o.mode = 'sad'; }
       }
       carrier = null; snapBack(); setTags();
-      return wait(2700).then(() => { celeAt = null; camMode = 'play'; cubeBig = ''; paintCube(); for(const o of skaters()){ o.mode = 'idle'; o.vmax = 7.2; } });
+      return new Promise(res => {
+        let ct = 0;
+        const end = () => { if(celeEnd !== end) return; celeEnd = null; clearTimeout(ct); celeAt = null; camMode = 'play'; cubeBig = ''; paintCube(); for(const o of skaters()){ o.mode = 'idle'; o.vmax = 7.2; } res(); };
+        celeEnd = end; ct = setTimeout(end, reduced() ? 500 : 2700);
+      });
     },
     /* the hats come down */
     hats(){ throwHats(); flashRate = 90; },

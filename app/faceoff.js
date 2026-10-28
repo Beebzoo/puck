@@ -17,12 +17,18 @@
    a forward, sets up a ONE-TIMER (the shot is a rung easier). Three saves in a
    row is a BRICK WALL, three goals for one man a HAT TRICK.
 
+   The shot is a choice: SNIPE (pick a spot, the goalie covers one) or RIP IT
+   (a rung easier, the goalie covers two). A save off the pads leaves a REBOUND
+   and the goalie's side has to answer to clear it. A forecheck that misses is
+   a hook: a POWER PLAY. Three right in a row puts you ON A HEATER (a 50-50).
+   Goals get a TV replay from the other end; a tap skips anything you watch.
+
    THE RULES LIVE HERE AND ONLY HERE. app/rink3d.js is told what happened and
    only decides how it looks (BALL's "a view, never a driver").
 
    Two of you on one phone take turns with the puck; the defender gets a say
-   twice: the forecheck (three soft passes in a row and he comes for the
-   fourth) and the goalie's blind pick. Or play the computer at Easy, Medium,
+   three times: the forecheck (after two soft passes he may go for the third:
+   a steal or a penalty), the goalie's blind pick and the rebound. Or play the computer at Easy, Medium,
    Hard or Expert, with BALL's own odds. Questions come from PUCK.questions.next(). */
 (function(){
 const P = window.PUCK = window.PUCK || {};
@@ -79,8 +85,21 @@ function tierFor(zone, a, b){
 /* where you can shoot from, and what it costs */
 const SHOT_AT = { 1: 'extreme', 2: 'extreme', 3: 'normal', 4: 'hard', 5: 'hard' };
 const SHOT_SAYS = { normal: 'from the slot', hard: 'off the wing', extreme: 'from the point' };
-/* three soft ones in a row and the forecheck comes for the fourth */
-const PRESS_AT = 3;
+/* two soft ones in a row and the other side may forecheck the third */
+const PRESS_AT = 2;
+/* the shot menu: SNIPE (the rung for where he is, the goalie covers one spot of five)
+   or RIP IT, a quick shot (a rung easier, but the goalie gets to cover two). A save off the pads (low
+   spots), or any quick shot he doesn't catch, leaves a REBOUND in the crease: the defending side
+   has to answer to clear it, a miss and it's buried. Glove high he catches; blocker high goes
+   to the corner. */
+const PAD_SPOTS = ['fh', 'lg', 'lb'];
+const reboundOff = (spot, quick) => quick ? spot !== 'gh' : PAD_SPOTS.includes(spot);
+/* a power play: a forecheck that misses is a hook, two minutes, the man who did it goes to the
+   box. The side on the power play gets one fewer man marked until it scores or the time is up */
+const PP_QS = 4;
+/* on a heater: three right in a row and your next question is a 50-50 */
+const HEAT_AT = 3;
+const SPOT_KEYS = ['gh', 'bh', 'fh', 'lg', 'lb'];
 
 /* ---------------- difficulty: THE one place that says which questions come up ----------------
    tiers goes straight into PUCK.questions.next({ tiers }). Inside the band, a
@@ -162,8 +181,10 @@ function setup(){
     '<div class="fo-card fo-how"><span class="fo-k">How it works</span><ol>' +
       '<li><b>Pass:</b> tap a team-mate, answer right and he has it. Wrong, and they pick it off.</li>' +
       '<li><b>Look around:</b> drag the rink or tap <i>Top</i>. A <em>marked</em> man is a rung harder than an open one.</li>' +
-      '<li><b>Shoot</b> in their zone: answer, pick a spot. The goalie picks one blind.</li>' +
-      '<li><b>Breakaway:</b> a stretch pass to an open man into their zone, and the shot is an easy one. A pass across the slot sets up a <b>one-timer</b>.</li></ol></div>' +
+      '<li><b>Shoot</b> in their zone: <i>snipe</i> (pick a spot, the goalie covers one blind) or <i>rip it</i> (a rung easier, but he covers two). A pad save leaves a <b>rebound</b>: the goalie\'s side answers to clear it.</li>' +
+      '<li><b>Breakaway:</b> a stretch pass to an open man into their zone, and the shot is an easy one. A pass across the slot sets up a <b>one-timer</b>.</li>' +
+      '<li><b>Forecheck:</b> after two soft passes the other side may go for the puck. Right steals it; wrong is a hook and a <b>power play</b>.</li>' +
+      '<li><b>Heater:</b> three right in a row and your next question is a 50-50.</li></ol></div>' +
     '<button type="button" class="fo-go" id="start"><span class="ab a">A</span>Drop the puck</button></div>';
   /* the sweater room: your man turning on the ice */
   RK = P.rink.get();
@@ -219,11 +240,12 @@ function newMatch(s){
     live: true, p, men, diff: s.diff, len: s.len, qpp: LENS[s.len].qpp, shots: s.shots,
     score: [0, 0], period: 1, q: 0, qIn: 0,
     att: 0, zone: 'F', at: 3, safe: 0, phase: 'start', taker: 0, cov: null, brk: false, oneT: false,
-    st: [0, 1].map(() => ({ passes: 0, lost: 0, shots: 0, saves: 0, steals: 0 })), wall: [0, 0], goals: [], so: null, end: null
+    st: [0, 1].map(() => ({ passes: 0, lost: 0, shots: 0, saves: 0, steals: 0, pp: 0 })), wall: [0, 0], goals: [], so: null, end: null,
+    streak: [0, 0], hot: [false, false], pp: null
   };
 }
 const RM = () => (RK && RK.match) || STUB;
-const STUB = { teams(){}, place(){}, pass: () => wait(500), faceoff(){}, drop: () => wait(500), aim(){}, endShot(){}, toGoalie(){}, celebrate: () => wait(900), select(){}, unselect(){}, target(){}, hats(){}, score(){}, view(){}, controls(){}, att: 0 };
+const STUB = { teams(){}, place(){}, pass: () => wait(500), faceoff(){}, drop: () => wait(500), aim(){}, endShot(){}, toGoalie(){}, celebrate: () => wait(900), select(){}, unselect(){}, target(){}, hats(){}, score(){}, view(){}, controls(){}, box(){}, scramble(){}, putBack: () => wait(700), replay: () => Promise.resolve(), att: 0 };
 const manName = (w, i) => M.men[w][i].label;
 
 /* ---------------- who is marked ----------------
@@ -232,10 +254,13 @@ const manName = (w, i) => M.men[w][i].label;
    at the puck. A marked man costs a rung more, and if the pass misses it is his
    marker who has it. Done in the attacking side's frame. */
 const toAtt = q => [-q[0], 54.26 - q[1]];
+/* is side w's man i in the penalty box? */
+const boxed = (w, i) => !!(M && M.pp && M.pp.box.w === w && M.pp.box.i === i);
 function cover(){
   const zone = M.zone, sh = SHAPES[zone], here = sh[M.at];
-  const recv = [1, 2, 3, 4, 5].filter(b => b !== M.at);
-  const n = M.brk ? 0 : zone === 'D' ? 1 : 2;
+  const recv = [1, 2, 3, 4, 5].filter(b => b !== M.at && !boxed(M.att, b));
+  let n = M.brk ? 0 : zone === 'D' ? 1 : 2;
+  if(M.pp && M.pp.w === M.att) n = Math.min(n, 1);
   const pool = recv.map(b => ({ b, w: 1 + Math.max(0, here[1] - sh[b][1])/5 }));
   const marked = [];
   for(let k = 0; k < n && pool.length; k++){
@@ -243,7 +268,8 @@ function cover(){
     for(; j < pool.length - 1; j++){ r -= pool[j].w; if(r <= 0) break; }
     marked.push(pool.splice(j, 1)[0].b);
   }
-  const defs = [1, 2, 3, 4, 5].map(i => ({ i, p: toAtt(DEF[zone][i]) })), free = new Set([1, 2, 3, 4, 5]), marks = {};
+  const live5 = [1, 2, 3, 4, 5].filter(i => !boxed(1 - M.att, i));
+  const defs = live5.map(i => ({ i, p: toAtt(DEF[zone][i]) })), free = new Set(live5), marks = {};
   for(const b of marked){
     let best = null, bd = 1e9;
     for(const d of defs) if(free.has(d.i)){ const dd = Math.hypot(d.p[0] - sh[b][0], d.p[1] - sh[b][1]); if(dd < bd){ bd = dd; best = d.i; } }
@@ -265,7 +291,7 @@ function passTier(b){ const t = tierFor(M.zone, M.at, b); return markedBy(b) != 
 const advances = b => b >= 3 && SHAPES[M.zone][M.at][1] - SHAPES[M.zone][b][1] > 2 && M.zone !== 'O';
 const tagInfo = () => {
   const o = {};
-  for(let b = 1; b < 6; b++) if(b !== M.at){
+  for(let b = 1; b < 6; b++) if(b !== M.at && !boxed(M.att, b)){
     const t = passTier(b), by = markedBy(b), brk = M.zone === 'N' && advances(b) && t === 'extreme' && by == null;
     o[b] = { tier: t, say: TIERS[t].say, marked: by != null, by, hot: brk || advances(b), note: by != null ? 'Marked' : brk ? 'Breakaway' : 'Open' };
   }
@@ -292,6 +318,7 @@ function sides(){
 }
 function placeAll(instant){
   if(M.zone !== 'F') cover();
+  RM().box(M.pp ? M.pp.box : null);
   RM().place({ att: M.att, sides: sides(), carrier: M.zone === 'F' ? null : { w: M.att, i: M.at }, instant: !!instant });
 }
 /* which of theirs cuts the pass out: his marker, else the one nearest the lane 60 per cent of the way */
@@ -300,7 +327,7 @@ function interceptor(b){
   const a = SHAPES[M.zone][M.at], r = SHAPES[M.zone][b];
   const px = a[0] + (r[0] - a[0])*.6, pz = a[1] + (r[1] - a[1])*.6;
   let best = 3, bd = 1e9;
-  for(let i = 1; i < 6; i++){ const q = defSpot(i), d = Math.hypot(q[0] - px, q[1] - pz); if(d < bd){ bd = d; best = i; } }
+  for(let i = 1; i < 6; i++){ if(boxed(1 - M.att, i)) continue; const q = defSpot(i), d = Math.hypot(q[0] - px, q[1] - pz); if(d < bd){ bd = d; best = i; } }
   return best;
 }
 
@@ -343,13 +370,14 @@ function play(){
     '<div class="fo-banner" id="toast" aria-live="polite"></div>' +
     '<div class="fo-hint" id="hint" hidden><b>Look around</b> drag the rink · pinch to zoom · <i>Top</i> for the whole ice</div>' +
     '<div class="fo-dock" id="dock"><div class="fo-call" id="call" aria-live="polite"></div><div class="fo-q" id="qc" hidden></div></div>' +
+    '<button type="button" class="fo-skip" id="skip" hidden>Tap to skip <i>&#8250;&#8250;</i></button>' +
     '<div class="fo-over" id="after" hidden></div>' +
     '<div class="fo-hand" id="hand" hidden></div></div>';
   RK = P.rink.get();
   const box = U.$('#rinkbox');
   if(RK){ RK.mount(box); U.onLeave(() => RK.unmount()); }
   else box.innerHTML = '<p class="note fo-nogl">This browser can\'t draw the 3D rink, so the match plays out in words.</p>';
-  U.onLeave(() => { tokN++; if(RK){ RM().unselect(); RK.onLook = RK.onHit = RK.onPass = RK.onCatch = null; } stageOff(); });
+  U.onLeave(() => { tokN++; skipOn = false; if(RK){ RM().unselect(); RK.onLook = RK.onHit = RK.onPass = RK.onCatch = null; } stageOff(); });
   document.body.classList.add('fo-on');
   /* the HUD covers the top and bottom of the rink: tell the camera, so the play sits in the middle of what is left */
   const hud = U.$('#hud'), dock = U.$('#dock'), stage = U.$('#fo');
@@ -359,6 +387,11 @@ function play(){
     stage.style.setProperty('--hudH', Math.round(top) + 'px'); stage.style.setProperty('--dockH', Math.round(bot) + 'px');
     if(RK) RK.insets(top, bot);
   };
+  /* watching, not playing (the shot, the goal, the replay): a tap anywhere on the ice speeds it on */
+  stage.addEventListener('click', e => {
+    if(!skipOn || e.target.closest('a,.fo-q,.fo-call,.fo-over,.fo-hand,.fo-hud,.camui,.tag,.spot')) return;
+    if(RK && RK.skip) RK.skip();
+  });
   if(window.ResizeObserver){ const ro = new ResizeObserver(fit); ro.observe(hud); ro.observe(dock); ro.observe(stage); U.onLeave(() => ro.disconnect()); }
   fit();
   /* sound */
@@ -380,6 +413,8 @@ function play(){
   placeAll(true); turn(tok);
 }
 const live = tok => tok === tokN && M && document.getElementById('call');
+let skipOn = false;
+function skippable(on){ skipOn = !!on && !!RK; const el = document.getElementById('skip'); if(el) el.hidden = !skipOn; }
 let lastScore = null;
 function board(){
   const el = document.getElementById('board'); if(!el) return;
@@ -389,12 +424,15 @@ function board(){
   lastScore = M.score.slice();
   const has = w => M.att === w && !M.so && M.zone !== 'F' && M.phase !== 'final';
   const side = w => '<div class="sb-tm' + (w ? ' r' : '') + (has(w) ? ' has' : '') + '" style="--tc:' + teamColor(M.p[w].team) + '">' + U.logoImg(M.p[w].team, 34, true) +
-    '<span class="sb-ab">' + esc(M.p[w].team) + '<small>' + esc(M.p[w].name) + '</small></span><i class="sb-puck" aria-hidden="true"></i></div>';
+    '<span class="sb-ab">' + esc(M.p[w].team) + '<small>' + esc(M.p[w].name) + '</small></span><i class="sb-puck" aria-hidden="true"></i>' +
+    (M.so ? '' : '<i class="sb-heat' + (M.hot[w] ? ' on' : '') + '" title="' + (M.hot[w] ? 'On a heater: next question is a 50-50' : M.streak[w] + ' right in a row') + '">' + [0, 1, 2].map(k => '<i class="' + (M.hot[w] || k < M.streak[w] ? 'f' : '') + '"></i>').join('') + '</i>') + '</div>';
   const sc = w => '<b class="sb-sc' + (w ? ' r' : '') + (bump[w] ? ' bump' : '') + '" style="--tc:' + teamColor(M.p[w].team) + '">' + M.score[w] + '</b>';
   const so = M.so ? '<div class="sb-so">' + [0, 1].map(w => '<span>' + Array.from({ length: Math.max(M.shots, M.so.kicks[w].length) }, (_, k) => { const x = M.so.kicks[w][k]; return '<i class="' + (x === true ? 'g' : x === false ? 'm' : '') + '"></i>'; }).join('') + '</span>').join('') + '</div>' : '';
-  el.innerHTML = '<div class="sb">' + side(0) + sc(0) + '<div class="sb-mid"><span class="sb-per">' + esc(per) + '</span>' + (clk ? '<span class="sb-clk">' + esc(clk) + '</span>' : '') + '<span class="sb-dif">' + esc((DIFFICULTY[M.diff] || DIFFICULTY.medium).label) + '</span></div>' + sc(1) + side(1) + '</div>' + so;
+  el.innerHTML = '<div class="sb">' + side(0) + sc(0) + '<div class="sb-mid"><span class="sb-per">' + esc(per) + '</span>' + (clk ? '<span class="sb-clk">' + esc(clk) + '</span>' : '') +
+    (M.pp && M.phase !== 'final' && !M.so ? '<span class="sb-pp" style="--tc:' + teamColor(M.p[M.pp.w].team) + '" title="' + esc(M.p[M.pp.w].team) + ' power play">' + (M.pp.w ? '' : '&#9664; ') + 'PP <b>' + ppLeft() + '</b>' + (M.pp.w ? ' &#9654;' : '') + '</span>' : '<span class="sb-dif">' + esc((DIFFICULTY[M.diff] || DIFFICULTY.medium).label) + '</span>') + '</div>' + sc(1) + side(1) + '</div>' + so;
   RM().score({ a: { abbr: M.p[0].team, color: teamColor(M.p[0].team), score: M.score[0] }, b: { abbr: M.p[1].team, color: teamColor(M.p[1].team), score: M.score[1] }, clock: (per + (clk ? '  ' + clk : '')).toUpperCase() });
 }
+function ppLeft(){ const s = Math.max(0, Math.round((M.pp.until - M.q)/PP_QS*120)); return Math.floor(s/60) + ':' + String(s % 60).padStart(2, '0'); }
 function clockSays(){
   const left = M.qpp - (M.q - (M.period - 1)*M.qpp), mins = Math.max(0, Math.round(left*20/M.qpp));
   return mins + ':00';
@@ -441,21 +479,25 @@ async function getQ(t){
   return null;
 }
 const KEYS = ['a', 'b', 'x', 'y'];
-function ask(tok, w, t, head){
+function ask(tok, w, t, head, o = {}){
   return new Promise(async res => {
     const qc = document.getElementById('qc'); if(!qc) return;
+    skippable(false);
     const q = await getQ(t);
     if(!live(tok)) return;
     M.q++; board();
     const ai = M.p[w].ai;
     if(!q){ qc.hidden = false; qc.innerHTML = '<p class="err">No questions found. Is _bank/questions/nhl.jsonl there?</p>'; await wait(1200); qc.hidden = true; return res(Math.random() < .5); }
-    const secs = TIERS[t].secs;
+    const secs = o.secs || TIERS[t].secs;
+    /* on a heater: two wrong answers struck off */
+    const heat = M.hot[w] && !M.so, gone = heat ? [0, 1, 2, 3].filter(i => i !== q.answer).sort(() => Math.random() - .5).slice(0, 2) : [];
+    if(heat){ M.hot[w] = false; M.streak[w] = 0; board(); }
     asking(true);
     qc.hidden = false; qc.className = 'fo-q' + (ai ? ' cpu' : '');
     qc.style.setProperty('--tc', teamColor(M.p[w].team));
-    qc.innerHTML = '<div class="fo-qhead">' + whoSays(w) + '<span class="fo-what">' + esc(head) + '</span><span class="tierchip t-' + t + '">' + TIERS[t].say + '</span></div>' +
+    qc.innerHTML = '<div class="fo-qhead">' + whoSays(w) + '<span class="fo-what">' + esc(head) + '</span>' + (heat ? '<span class="fo-5050">50-50</span>' : '') + '<span class="tierchip t-' + t + '">' + TIERS[t].say + '</span></div>' +
       '<div class="fo-timer"><i id="tm"></i><span id="tsec">' + secs + '</span></div><p class="fo-qq">' + esc(q.q) + '</p><div class="fo-opts">' +
-      q.options.map((o, i) => '<button type="button" class="opt" data-i="' + i + '"' + (ai ? ' disabled' : '') + '><span class="ab ' + KEYS[i] + '">' + KEYS[i].toUpperCase() + '</span><span class="ot">' + esc(o) + '</span></button>').join('') + '</div>' +
+      q.options.map((op, i) => '<button type="button" class="opt' + (gone.includes(i) ? ' gone' : '') + '" data-i="' + i + '"' + (ai || gone.includes(i) ? ' disabled' : '') + '><span class="ab ' + KEYS[i] + '">' + KEYS[i].toUpperCase() + '</span><span class="ot">' + esc(op) + '</span></button>').join('') + '</div>' +
       (ai ? '<p class="fo-think"><i></i><i></i><i></i>The computer is thinking</p>' : '') + '<p class="fo-sub" id="sub" hidden></p>';
     const bar = document.getElementById('tm'), secEl = document.getElementById('tsec');
     bar.style.transition = 'transform ' + secs + 's linear'; requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.transform = 'scaleX(0)'; }));
@@ -472,8 +514,15 @@ function ask(tok, w, t, head){
       U.$$('.opt', qc).forEach((b, j) => { b.disabled = true; if(j === q.answer) b.classList.add('right'); else if(j === i) b.classList.add('wrong'); if(j === i) b.classList.add('chosen'); });
       qc.classList.remove('late'); qc.classList.add(ok ? 'is-right' : 'is-wrong');
       const think = qc.querySelector('.fo-think'); if(think) think.remove();
+      /* the streak: three right in a row and the next one is a 50-50 */
+      let heated = false;
+      if(M.so){ /* the shootout is a clean duel: no heaters */ }
+      else if(ok){ M.streak[w]++; if(M.streak[w] >= HEAT_AT && !M.hot[w]){ M.hot[w] = true; heated = true; sfx('heat'); } }
+      else { M.streak[w] = 0; M.hot[w] = false; }
+      board();
       const sub = document.getElementById('sub'); sub.hidden = false;
-      sub.innerHTML = '<b>' + (i < 0 ? 'Time\'s up.' : ok ? 'Right!' : 'Not quite.') + '</b> ' + esc(q.sub || '') + '<small>Tap to go on</small>';
+      sub.innerHTML = '<b>' + (i < 0 ? 'Time\'s up.' : ok ? 'Right!' : 'Not quite.') + '</b> ' + esc(q.sub || '') +
+        (heated ? '<span class="fo-heated">On a heater: ' + esc(M.p[w].name) + '\'s next question is a 50-50</span>' : '') + '<small>Tap to go on</small>';
       sfx(ok ? 'right' : 'wrong'); if(!ai) buzz(ok ? 18 : [30, 50, 30]);
       /* a moment to read it; a tap on the card goes on straight away */
       await new Promise(r => { skip = r; setTimeout(r, (ok ? 950 : 1350) + Math.min(900, (q.sub || '').length*9)); });
@@ -482,17 +531,17 @@ function ask(tok, w, t, head){
       res(ok);
     };
     qc.onclick = e => { if(done && skip && !e.target.closest('.opt:not([disabled])')){ const s2 = skip; skip = null; s2(); } };
-    const onKey = e => { if(ai || done) return; const k = e.key.toLowerCase(), i = KEYS.indexOf(k) >= 0 ? KEYS.indexOf(k) : ['1', '2', '3', '4'].indexOf(k); if(i >= 0){ e.preventDefault(); answer(i); } };
+    const onKey = e => { if(ai || done) return; const k = e.key.toLowerCase(), i = KEYS.indexOf(k) >= 0 ? KEYS.indexOf(k) : ['1', '2', '3', '4'].indexOf(k); if(i >= 0 && !gone.includes(i)){ e.preventDefault(); answer(i); } };
     if(!ai) document.addEventListener('keydown', onKey);
     const timer = setTimeout(() => answer(-1), secs*1000);
     let aiT = 0;
     U.onLeave(() => { clearTimeout(timer); clearTimeout(aiT); clearInterval(tickI); document.removeEventListener('keydown', onKey); });
     if(ai){
-      const right = Math.random() < AI[ai].p[t];
-      const wrong = [0, 1, 2, 3].filter(i => i !== q.answer);
+      const p0 = AI[ai].p[t] || .5, right = Math.random() < (heat ? p0 + (1 - p0)*.5 : p0);
+      const wrong = [0, 1, 2, 3].filter(i => i !== q.answer && !gone.includes(i));
       const len = (q.q + q.options.join('')).length;
       aiT = setTimeout(() => answer(right ? q.answer : pick(wrong)), Math.min(3400, 1000 + len*11 + Math.random()*600));
-    } else U.$$('.opt', qc).forEach(b => b.addEventListener('click', () => answer(+b.dataset.i)));
+    } else U.$$('.opt', qc).forEach(b => b.addEventListener('click', () => { if(!b.classList.contains('gone')) answer(+b.dataset.i); }));
   });
 }
 /* the phone goes across the table (two humans only): the screen in his colours */
@@ -507,13 +556,25 @@ function handOver(tok, w, line){
   });
 }
 /* a spot on the net, tapped on the 3D net (or picked for the computer) */
-function pickSpot(tok, w, line){
-  const keys = ['gh', 'bh', 'fh', 'lg', 'lb'];
+function pickSpot(tok, w, line, taken = []){
+  const keys = SPOT_KEYS.filter(k => !taken.includes(k));
   if(M.p[w].ai || !RK) return wait(700).then(() => pick(keys));
   return new Promise(res => {
-    call(whoSays(w) + '<span class="fo-say">' + esc(line) + '</span>', w);
-    RK.pick(k => { RK.hold(); sfx('catch'); if(live(tok)) res(k); });
+    call(whoSays(w) + '<span class="fo-say">' + line + '</span>', w);
+    RK.pick(k => { if(taken.includes(k)) return; RK.hold(); sfx('catch'); if(live(tok)) res(k); }, taken);
   });
+}
+/* the goalie covers one spot, or two against a quick shot */
+async function cover2(tok, d, keeper, n){
+  if(M.p[d].ai){
+    call(whoSays(d) + '<span class="fo-say"><b>' + esc(keeper) + '</b> sets himself…</span>', d);
+    await wait(700);
+    return SPOT_KEYS.slice().sort(() => Math.random() - .5).slice(0, n);
+  }
+  const a = await pickSpot(tok, d, 'You\'re <b>' + esc(keeper) + '</b>. ' + (n > 1 ? 'A quick shot: cover <b>two</b> spots. The first?' : 'Where do you go?'));
+  if(n < 2 || !live(tok)) return [a];
+  const b = await pickSpot(tok, d, 'And your <b>second</b> spot?', [a]);
+  return [a, b];
 }
 
 /* ---------------- faceoff ---------------- */
@@ -546,6 +607,7 @@ async function turn(tok){
   if(!live(tok)) return;
   M.phase = 'turn';
   if(M.qpp && M.q >= M.qpp*M.period) return periodEnd(tok);
+  if(M.pp && M.q >= M.pp.until) endPP('Back to full strength', M.p[1 - M.pp.w].name + '\'s ' + nick(M.p[1 - M.pp.w].team) + ' killed it off');
   board();
   const w = M.att, me = M.p[w], info = tagInfo();
   const where = M.at === 0 ? 'in his crease' : ZONE_SAYS[M.zone];
@@ -556,20 +618,25 @@ async function turn(tok){
     if(!live(tok)) return;
     return aiAct(tok, info);
   }
-  const press = M.safe >= PRESS_AT, st = canShoot() ? shotTier() : null;
+  const press = M.safe >= PRESS_AT && !(M.pp && M.pp.w === w), st = canShoot() ? shotTier() : null;
+  /* the shot menu: a breakaway or a one-timer is one shot; otherwise pick your spot, or a quick one */
+  const menu = st && !M.brk && !M.oneT, qt = st ? down(st) : null;
   const opens = Object.keys(info).filter(b => !info[b].marked).map(b => M.men[w][b].label);
-  call(whoSays(w) + '<span class="fo-zone">' + ZONE_TAG[M.zone] + '</span><span class="fo-say"><b>' + esc(holder) + '</b> has it. Tap a team-mate to pass' + (st ? ', or shoot' : '') + '.' +
-    (opens.length ? ' <span class="fo-open">Open: ' + opens.map(esc).join(', ') + '</span>' : '') +
-    (press ? ' <em>Forecheck on: a soft pass now gets challenged.</em>' : '') + '</span>' +
-    '<div class="fo-acts">' + (st ? '<button type="button" class="fo-shoot' + (M.brk || M.oneT ? ' hot' : '') + '" id="shoot"><span class="ab y">Y</span><span>Shoot <small>' + esc(shotSays()) + '</small></span><span class="tierchip t-' + st + '">' + TIERS[st].say + '</span></button>' : '') +
+  const pp = M.pp ? (M.pp.w === w ? ' <span class="fo-ppsay">Power play: they can only mark one man.</span>' : ' <span class="fo-ppsay sh">Shorthanded: ' + esc(M.men[w][M.pp.box.i].label) + ' is in the box.</span>') : '';
+  call(whoSays(w) + '<span class="fo-zone">' + ZONE_TAG[M.zone] + '</span><span class="fo-say"><b>' + esc(holder) + '</b> has it' + (st && menu ? ' ' + esc(shotSays()) : '') + '. Tap a team-mate to pass' + (st ? ', or shoot' : '') + '.' +
+    (opens.length && !st ? ' <span class="fo-open">Open: ' + opens.map(esc).join(', ') + '</span>' : '') + pp +
+    (press ? ' <em>Careful: another soft pass and ' + esc(M.p[1 - w].name) + ' can forecheck.</em>' : '') + '</span>' +
+    '<div class="fo-acts">' + (st ? '<button type="button" class="fo-shoot' + (M.brk || M.oneT ? ' hot' : '') + '" id="shoot"><span class="ab y">Y</span><span>' + (menu ? 'Snipe' : 'Shoot') + ' <small>' + esc(menu ? 'he covers 1 spot' : shotSays()) + '</small></span><span class="tierchip t-' + st + '">' + TIERS[st].say + '</span></button>' : '') +
+    (menu ? '<button type="button" class="fo-shoot fo-quick" id="quick"><span class="ab x">X</span><span>Rip it <small>he covers 2 · rebounds</small></span><span class="tierchip t-' + qt + '">' + TIERS[qt].say + '</span></button>' : '') +
     (!RK ? Object.keys(info).map(b => '<button type="button" class="fo-passbtn" data-pass="' + b + '">' + esc(manName(w, b)) + ' <span class="tierchip t-' + info[b].tier + '">' + info[b].say + '</span></button>').join('') : '') + '</div>', w);
   RM().select(info, b => { RM().unselect(); passTo(tok, +b); });
   hint(true);
   const sh = document.getElementById('shoot');
   if(sh){
-    const onY = e => { if(e.key.toLowerCase() === 'y' && live(tok) && document.getElementById('shoot')){ e.preventDefault(); go(); } };
-    const go = () => { document.removeEventListener('keydown', onY); RM().unselect(); shoot(tok); };
-    sh.addEventListener('click', go);
+    const onY = e => { const k = e.key.toLowerCase(); if((k === 'y' || (k === 'x' && menu)) && live(tok) && document.getElementById('shoot')){ e.preventDefault(); go(k === 'x'); } };
+    const go = quick => { document.removeEventListener('keydown', onY); RM().unselect(); shoot(tok, quick); };
+    sh.addEventListener('click', () => go(false));
+    const qb = document.getElementById('quick'); if(qb) qb.addEventListener('click', () => go(true));
     document.addEventListener('keydown', onY); U.onLeave(() => document.removeEventListener('keydown', onY));
     RM().select(info, b => { document.removeEventListener('keydown', onY); RM().unselect(); passTo(tok, +b); });
   }
@@ -580,7 +647,7 @@ function aiAct(tok, info){
   const lv = AI[M.p[M.att].ai].p;
   if(canShoot()){
     const st = shotTier(), go = M.brk ? .97 : st === 'easy' ? .95 : st === 'normal' ? .88 : st === 'hard' ? .5 : .12;
-    if(Math.random() < go) return shoot(tok);
+    if(Math.random() < go) return shoot(tok, !M.brk && !M.oneT && (st === 'hard' || st === 'extreme') && Math.random() < .6);
   }
   const here = SHAPES[M.zone][M.at];
   const opts = Object.keys(info).map(b => {
@@ -595,23 +662,66 @@ function aiAct(tok, info){
   for(const o of opts){ r -= o.wgt; if(r <= 0) return passTo(tok, o.b); }
   return passTo(tok, opts[0].b);
 }
+/* the defender's call: go for the puck (a steal, or a penalty) or sit back and let the pass be */
+function forecheckCall(tok, d, w, b){
+  if(M.p[d].ai) return wait(350).then(() => Math.random() < (M.zone === 'D' ? .7 : .5));
+  return new Promise(res => {
+    sfx('tick');
+    call(whoSays(d) + '<span class="fo-say"><b>' + esc(M.p[d].name) + ', forecheck?</b> ' + esc(M.p[w].name) + ' keeps it soft. Go for it: a right answer steals it, a wrong one is a hook, two minutes and a power play. Or sit back and let ' + esc(M.p[w].name) + ' answer for the pass.</span>' +
+      '<div class="fo-acts"><button type="button" class="fo-shoot fo-fc" data-choice="go"><span class="ab a">A</span><span>Go for it <small>steal or penalty</small></span></button>' +
+      '<button type="button" class="fo-shoot fo-quick" data-choice="sit"><span class="ab b">B</span><span>Sit back <small>let him pass</small></span></button></div>', d);
+    const done = v => { document.removeEventListener('keydown', onK); if(live(tok)) res(v); };
+    const onK = e => { const k = e.key.toLowerCase(); if(k === 'a' || k === 'b'){ e.preventDefault(); done(k === 'a'); } };
+    document.addEventListener('keydown', onK); U.onLeave(() => document.removeEventListener('keydown', onK));
+    U.$$('[data-choice]').forEach(x => x.addEventListener('click', () => done(x.dataset.choice === 'go')));
+  });
+}
+function endPP(title, sub){
+  if(!M.pp) return;
+  M.pp = null; RM().box(null);
+  if(title) toast(title, sub || '', 'info');
+  board();
+}
 const hintAway = () => { const h = document.getElementById('hint'); if(h) h.hidden = true; };
 async function passTo(tok, b){
   if(!live(tok)) return;
   hintAway();
   const w = M.att, t = passTier(b), soft = t === 'easy' || t === 'normal';
   RM().target({ w, i: b });
-  if(soft && M.safe >= PRESS_AT){
-    /* the forecheck: he answers first. Right, and he takes it; wrong, and you are through him */
-    const d = 1 - w;
-    call(whoSays(d) + '<span class="fo-say"><b>Forecheck!</b> ' + esc(M.p[d].name) + ' comes for it. A right answer steals the puck.</span>', d);
-    toast('Forecheck', M.p[d].name + ' comes for it', 'bad', d);
-    await wait(500);
-    const stole = await ask(tok, d, 'normal', 'Forecheck');
+  if(soft && M.safe >= PRESS_AT && !(M.pp && M.pp.w === w)){
+    /* the forecheck: the other side may go for it. He answers first: right, and he takes it;
+       wrong, and he hooks you on the way past: two minutes, a power play */
+    const d = 1 - w, c = M.cov || {}, fc = c.press != null ? c.press : 4;
+    const goFor = await forecheckCall(tok, d, w, b);
     if(!live(tok)) return;
-    if(stole){ M.st[d].steals++; return lose(tok, b, 'Stolen', 'on the forecheck'); }
-    toast('Beat him', M.men[w][b].label + ' is clear', 'good', w);
-    return complete(tok, b, t);
+    if(!goFor) M.safe = 0;
+    if(goFor){
+      call(whoSays(d) + '<span class="fo-say"><b>Forecheck!</b> ' + esc(M.men[d][fc].label) + ' comes for it. Right steals the puck; wrong is a hook and two minutes.</span>', d);
+      toast('Forecheck', M.p[d].name + ' comes for it', 'bad', d);
+      sfx('steal');
+      await wait(450);
+      const stole = await ask(tok, d, 'normal', 'Forecheck · steal it or take a penalty');
+      if(!live(tok)) return;
+      if(stole){ M.st[d].steals++; return lose(tok, b, 'Stolen', 'on the forecheck'); }
+      /* the hook: the forechecker (a forward; a defenceman sends a winger) goes to the box */
+      const bi = fc >= 4 ? fc : (Math.random() < .5 ? 4 : 5);
+      if(M.pp){
+        /* they were on the power play themselves: a penalty each way, back to five on five */
+        endPP('Offsetting minors', 'Back to five on five');
+        sfx('whistle');
+        await wait(900);
+        if(!live(tok)) return;
+        return complete(tok, b, t);
+      }
+      M.pp = { w, box: { w: d, i: bi }, until: M.q + PP_QS };
+      M.st[w].pp++;
+      sfx('whistle'); buzz([30, 40, 30]);
+      toast('Hooking!', M.men[d][bi].label + ' · 2 minutes · ' + poss(M.p[w].name) + ' power play', 'big', w);
+      board();
+      await wait(700);
+      if(!live(tok)) return;
+      return complete(tok, b, t);
+    }
   }
   const by = markedBy(b);
   call(whoSays(w) + '<span class="fo-say">' + PASS_SAYS[t] + ' to <b>' + esc(M.men[w][b].label) + '</b>' + (by != null ? ', marked by ' + esc(M.men[1 - w][by].label) : '') + '.</span>', w);
@@ -652,63 +762,107 @@ async function lose(tok, b, title, sub){
 }
 
 /* ---------------- the shot ---------------- */
-async function shoot(tok){
+async function shoot(tok, quick){
   if(!live(tok)) return;
   hintAway();
-  const w = M.att, d = 1 - w, t = shotTier(), says = shotSays(), kind = M.brk ? 'brk' : M.oneT ? 'one' : '';
-  const shooter = M.men[w][M.at].label, keeper = M.men[d][0].label, shooterAt = M.at;
+  const w = M.att, d = 1 - w, kind = M.brk ? 'brk' : M.oneT ? 'one' : '';
+  quick = !!quick && !kind;
+  const t = quick ? down(shotTier()) : shotTier(), says = quick ? 'quick shot ' + SHOT_SAYS[SHOT_AT[M.at]] : shotSays();
+  const shooter = M.men[w][M.at].label, keeper = M.men[d][0].label, shooterAt = M.at, onPP = !!(M.pp && M.pp.w === w);
   M.st[w].shots++;
-  call(whoSays(w) + '<span class="fo-say"><b>' + esc(shooter) + '</b> shoots ' + esc(says) + '.</span>', w);
+  call(whoSays(w) + '<span class="fo-say"><b>' + esc(shooter) + '</b> ' + (quick ? 'lets a quick one go ' + esc(SHOT_SAYS[SHOT_AT[M.at]]) : 'shoots ' + esc(says)) + '.</span>', w);
   const ok = await ask(tok, w, t, 'Shot ' + says);
   if(!live(tok)) return;
   RM().aim(w, M.at, { kind });
   M.brk = M.oneT = false;
-  await wait(650);
+  await wait(500);
   if(!live(tok)) return;
-  const keys = ['gh', 'bh', 'fh', 'lg', 'lb'];
-  let spot, guess;
+  let spot, cov;
   if(!ok){
-    spot = pick(keys); guess = spot;
+    spot = pick(SPOT_KEYS); cov = [spot];
     call(whoSays(w) + '<span class="fo-say">Not cleanly struck: <b>' + esc(keeper) + '</b> reads it all the way.</span>', w);
   } else {
-    spot = await pickSpot(tok, w, 'Pick your spot on ' + keeper + '.');
+    spot = await pickSpot(tok, w, 'Pick your spot on <b>' + esc(keeper) + '</b>.' + (quick ? ' He gets to cover two.' : ''));
     if(!live(tok)) return;
     const both = !M.p[w].ai && !M.p[d].ai;
-    if(both){ await handOver(tok, d, M.p[w].name + ' has picked a spot. You\'re in goal: pick one blind. Same spot and it\'s saved.'); if(!live(tok)) return; }
-    if(M.p[d].ai){ call(whoSays(d) + '<span class="fo-say"><b>' + esc(keeper) + '</b> sets himself…</span>', d); guess = await pickSpot(tok, d, ''); }
-    else guess = await pickSpot(tok, d, 'You\'re ' + keeper + '. Where do you go?');
+    if(both){ await handOver(tok, d, M.p[w].name + ' has picked a spot. You\'re in goal: ' + (quick ? 'it\'s a quick shot, so cover two spots blind.' : 'pick one blind.') + ' The same spot and it\'s saved.'); if(!live(tok)) return; }
+    cov = await cover2(tok, d, keeper, quick ? 2 : 1);
     if(!live(tok)) return;
   }
-  const scored = ok && spot !== guess, S = (RK && RK.SPOTS) || {};
+  const scored = ok && !cov.includes(spot), guess = scored ? cov[0] : spot, S = (RK && RK.SPOTS) || {};
   call(whoSays(w) + '<span class="fo-say"><b>' + esc(shooter) + '</b> on ' + esc(keeper) + '…</span>', w);
   sfx('shot');
-  if(RK) await RK.shoot({ spot, scored, guess }); else await wait(900);
+  skippable(true);
+  if(RK) await RK.shoot({ spot, scored, guess, cover: cov }); else await wait(900);
+  skippable(false);
   if(!live(tok)) return;
   const said = k => (S[k] && S[k].n || k).toLowerCase();
   if(scored){
-    M.score[w]++; M.wall[d] = 0; M.goals.push({ w, name: shooter, period: M.period, so: false });
-    board();
-    const n = M.goals.filter(g => !g.so && g.w === w && g.name === shooter).length;
-    call(whoSays(w) + '<span class="fo-say"><b>Scores!</b> ' + esc(said(spot)) + ', ' + esc(keeper) + ' went ' + esc(said(guess)) + '. ' + M.score[0] + '–' + M.score[1] + '.</span>', w);
     RM().endShot();
-    const cele = RM().celebrate(w, shooterAt);
-    if(n === 3){ RM().hats(); toast('Hat trick!', shooter + ' · the hats are coming down', 'big', w); sfx('big'); }
-    else toast('Goal!', shooter + ' (' + M.p[w].name + ')', 'big', w);
-    await cele;
-    if(!live(tok)) return;
-    if(!M.qpp && M.score[w] >= 3) return endMatch(tok);
-    return faceoff(tok, d);
+    return goal(tok, w, shooterAt, { kind: kind || (quick ? 'quick' : ''), pp: onPP, replay: true,
+      line: '<b>Scores!</b> ' + esc(said(spot)) + ', ' + esc(keeper) + ' went ' + cov.map(said).map(esc).join(' and ') + '.' });
   }
   RM().endShot();
   M.st[d].saves++; M.wall[d]++;
-  call(whoSays(d) + '<span class="fo-say"><b>' + (ok ? 'Saved!' : 'Easy save.') + '</b> ' + (ok ? 'You went ' + esc(said(spot)) + ', ' + esc(keeper) + ' guessed it.' : esc(keeper) + ' had it all the way.') + ' ' + esc(poss(M.p[d].name)) + ' puck.</span>', d);
+  /* off the pads (or a quick one he can't hold): a rebound, loose in the crease */
+  if(ok && reboundOff(spot, quick)) return rebound(tok, w, shooterAt, spot, onPP);
+  call(whoSays(d) + '<span class="fo-say"><b>' + (ok ? 'Saved!' : 'Easy save.') + '</b> ' + (ok ? 'You went ' + esc(said(spot)) + ', ' + esc(keeper) + (spot === 'gh' ? ' gloves it.' : ' gets the blocker on it, out to the corner.') : esc(keeper) + ' had it all the way.') + ' ' + esc(poss(M.p[d].name)) + ' puck.</span>', d);
   if(M.wall[d] >= 3) toast(M.wall[d] === 3 ? 'Brick wall' : M.wall[d] + ' in a row', keeper + ' has stopped the last ' + M.wall[d], 'big', d);
   else toast(ok ? 'Save!' : 'Easy save', keeper + ' · ' + poss(M.p[d].name) + ' puck', 'info', d);
   M.att = d; M.zone = 'D'; M.at = 0; M.safe = 0; M.lastFrom = null;
   placeAll(false);
   board();
-  await wait(1100);
+  await wait(900);
   turn(tok);
+}
+/* the rebound: the side in goal has to clear it (its player holds the phone after the blind pick) */
+async function rebound(tok, w, shooterAt, spot, onPP){
+  const d = 1 - w, keeper = M.men[d][0].label;
+  const who = shooterAt === 3 ? (Math.random() < .5 ? 4 : 5) : 3, man = M.men[w][who].label;
+  const dm = Math.random() < .5 ? 1 : 2;
+  RM().scramble(w, who, dm);
+  toast('Rebound!', keeper + ' can\'t hold it · ' + man + ' is crashing the net', 'big', w);
+  sfx('big'); buzz([20, 30, 20]);
+  call(whoSays(d) + '<span class="fo-say"><b>Rebound!</b> ' + esc(M.p[d].name) + ', clear it: right and ' + esc(M.men[d][dm].label) + ' sweeps it away, wrong and <b>' + esc(man) + '</b> buries it.</span>', d);
+  await wait(900);
+  if(!live(tok)) return;
+  const cleared = await ask(tok, d, 'normal', 'Rebound · clear it', { secs: 10 });
+  if(!live(tok)) return;
+  skippable(true);
+  await RM().putBack({ w, i: who, scored: !cleared, d, dm });
+  skippable(false);
+  if(!live(tok)) return;
+  if(!cleared) return goal(tok, w, who, { kind: 'reb', pp: onPP, line: '<b>Scores on the rebound!</b> ' + esc(man) + ' was first to it.' });
+  M.st[d].steals++;
+  toast('Cleared', M.men[d][dm].label + ' · ' + poss(M.p[d].name) + ' puck', 'good', d);
+  M.att = d; M.zone = 'D'; M.at = dm; M.safe = 0; M.lastFrom = null;
+  placeAll(false);
+  board();
+  await wait(700);
+  turn(tok);
+}
+/* a goal: the lights, the scorer, the replay, then back to centre (or the end, first to 3) */
+const KIND_SAYS = { brk: 'Breakaway', one: 'One-timer', reb: 'Rebound', quick: 'Quick shot' };
+async function goal(tok, w, at, o){
+  const d = 1 - w, name = M.men[w][at].label;
+  M.score[w]++; M.wall[d] = 0;
+  M.goals.push({ w, name, period: M.period, so: false, kind: o.kind || '', pp: !!o.pp });
+  if(o.pp) endPP();
+  board();
+  const n = M.goals.filter(g => !g.so && g.w === w && g.name === name).length;
+  call(whoSays(w) + '<span class="fo-say">' + o.line + ' ' + M.score[0] + '–' + M.score[1] + '.</span>', w);
+  skippable(true);
+  const cele = RM().celebrate(w, at);
+  const tag = [o.pp ? 'Power-play goal' : '', KIND_SAYS[o.kind] || ''].filter(Boolean).join(' · ');
+  if(n === 3){ RM().hats(); toast('Hat trick!', name + ' · the hats are coming down', 'big', w); sfx('big'); }
+  else toast(o.pp ? 'Power-play goal!' : 'Goal!', name + ' (' + M.p[w].name + ')' + (tag && !o.pp ? ' · ' + tag : ''), 'big', w);
+  await cele;
+  if(!live(tok)) return;
+  /* the replay, from the other end, slowed down: tap to skip it */
+  if(o.replay && RK && !reduced()){ sfx('swoosh'); await RM().replay(); if(!live(tok)) return; }
+  skippable(false);
+  if(!M.qpp && M.score[w] >= 3) return endMatch(tok);
+  return faceoff(tok, d);
 }
 
 /* ---------------- the clock ---------------- */
@@ -765,13 +919,15 @@ async function shootoutNext(tok){
   const sudden = so.kicks[w].length >= M.shots;
   const keys = ['gh', 'bh', 'fh', 'lg', 'lb'];
   if(M.p[w].ai) call(whoSays(w) + '<span class="fo-say"><b>' + esc(man.label) + '</b> shoots on ' + esc(keeper.label) + (sudden ? ' · sudden death' : '') + '.</span>', w);
-  const spot = await pickSpot(tok, w, man.label + ' shoots on ' + keeper.label + (sudden ? ' · sudden death' : '') + '. Pick a spot, then answer: right and the goalie bites.');
+  const spot = await pickSpot(tok, w, esc(man.label + ' shoots on ' + keeper.label + (sudden ? ' · sudden death' : '') + '. Pick a spot, then answer: right and the goalie bites.'));
   if(!live(tok)) return;
   const ok = await ask(tok, w, 'normal', 'Shootout' + (sudden ? ' · sudden death' : ''));
   if(!live(tok)) return;
   const others = keys.filter(k => k !== spot);
   sfx('shot');
+  skippable(true);
   if(RK) await RK.shoot({ spot, scored: ok, guess: ok ? pick(others) : spot }); else await wait(800);
+  skippable(false);
   if(!live(tok)) return;
   so.kicks[w].push(ok); so.n++;
   if(ok) M.goals.push({ w, name: man.label, so: true });
@@ -791,7 +947,15 @@ function final(tok){
   call('');
   const w = M.score[0] > M.score[1] ? 0 : 1, W = M.p[w], L = M.p[1 - w];
   if(RM().goalieWin) RM().goalieWin(W.team);
-  const scorers = side => M.goals.filter(g => g.w === side && !g.so).map(g => esc(g.name) + (g.period && M.qpp ? ' <small>' + PERIOD_SAYS[g.period - 1] + '</small>' : '')).join(', ') || '–';
+  /* the scoring summary: every goal in order, the score after it, how it went in */
+  const summary = () => {
+    const run = [0, 0], gs = M.goals.filter(g => !g.so);
+    if(!gs.length) return '<p class="fo-scorers">No goals in regulation' + (M.end === 'SO' ? ': settled in the shootout.' : '.') + '</p>';
+    return '<ol class="fo-sum">' + gs.map(g => { run[g.w]++; return '<li style="--tc:' + teamColor(M.p[g.w].team) + '">' + U.logoImg(M.p[g.w].team, 22, true) +
+      '<span class="fo-sum-n"><b>' + esc(g.name) + '</b>' + (g.period && M.qpp ? '<small>' + PERIOD_SAYS[g.period - 1] + '</small>' : '') + '</span>' +
+      (g.pp ? '<i class="fo-chip pp">PP</i>' : '') + (KIND_SAYS[g.kind] ? '<i class="fo-chip">' + KIND_SAYS[g.kind] + '</i>' : '') +
+      '<span class="fo-sum-s">' + run[0] + '–' + run[1] + '</span></li>'; }).join('') + '</ol>';
+  };
   const st = M.st;
   const row = (lab, k) => '<tr><td>' + st[0][k] + '</td><th>' + lab + '</th><td>' + st[1][k] + '</td></tr>';
   /* three stars: the scorers first, then the busier goalie, then whoever stole the most */
@@ -808,8 +972,8 @@ function final(tok){
     '<h2>' + esc(W.name) + (W.ai ? ' win' : ' wins') + '</h2><p class="fo-p">' + M.score[w] + '–' + M.score[1 - w] + (M.end === 'SO' ? ' in the shootout' : '') + ' against ' + esc(L.name) + '.</p>' +
     (stars.length ? '<ol class="fo-stars">' + stars.map((s, i) => '<li style="--tc:' + teamColor(M.p[s.w].team) + '"><span class="st">' + '★'.repeat(i + 1) + '</span><b>' + esc(s.name) + '</b><small>' + esc(M.p[s.w].team) + ' · ' + esc(s.line) + '</small></li>').join('') + '</ol>' : '') +
     '<table class="fo-stats"><thead><tr><td>' + esc(M.p[0].name) + '</td><th></th><td>' + esc(M.p[1].name) + '</td></tr></thead><tbody>' +
-    row('Shots', 'shots') + row('Saves', 'saves') + row('Passes', 'passes') + row('Lost it', 'lost') + row('Steals', 'steals') + '</tbody></table>' +
-    '<p class="fo-scorers"><b>' + esc(M.p[0].name) + '</b> ' + scorers(0) + '<br><b>' + esc(M.p[1].name) + '</b> ' + scorers(1) + '</p>' +
+    row('Shots', 'shots') + row('Saves', 'saves') + row('Passes', 'passes') + row('Lost it', 'lost') + row('Steals', 'steals') + row('Power play', 'pp') + '</tbody></table>' +
+    summary() +
     '<div class="fo-endbtns"><button type="button" class="fo-go" id="again"><span class="ab a">A</span>Rematch</button><button type="button" class="fo-mini" id="chg">Change teams</button></div></div>';
   el.hidden = false;
   document.getElementById('again').addEventListener('click', () => { const s = loadSetup(); M = newMatch(s); lastScore = null; play(); });
