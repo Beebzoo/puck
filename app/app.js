@@ -23,7 +23,7 @@ function until(iso){
 }
 
 /* ---------------- router ---------------- */
-const ROUTES = { home, pool, table, nhl, me, faceoff, lists };
+const ROUTES = { home, pool, table, nhl, me, faceoff, lists, t1 };
 /* plug-in games: P.addGame({ id, title, sub, render(arg) }) from app/games/*.js;
    they get a Home tile and the route #<id> (or #<id>-<arg>) */
 P.games = P.games || [];
@@ -34,7 +34,7 @@ async function route(){
   const [name, arg] = h.split(/-(.+)/);
   const plug = P.games.find(g => g.id === name);
   const fn = name === "list" ? listPlay : plug ? plug.render : ROUTES[name] || home;
-  const key = fn === home ? "home" : name;
+  const key = fn === home ? "home" : name === "t1" && arg ? "t1q" : name;
   /* PUCK 26 shell (app/p26/p26.js): leave() may close a wipe first (a few hundred ms; a
      newer route wins), route() sets the tabs and chrome and closes the loading screen,
      enter() animates the new screen in. The screen renders its first HTML synchronously. */
@@ -58,6 +58,9 @@ async function table(){ return P.pool.table(app, band); }
 async function me(){ return P.pool.me(app, band); }
 /* ---------------- NHL: the stats centre, app/nhl/nhl-tab.js (#nhl, #nhl-standings, #nhl-team-MTL…) ---------------- */
 async function nhl(arg){ return P.nhlTab.render(app, arg || ""); }
+
+/* ---------------- T1: the training tab, app/train/train.js (#t1, #t1-<lesson>, #t1-review) ---------------- */
+async function t1(arg){ return P.train.render(arg || ""); }
 
 /* ---------------- Faceoff: One on One on ice, in app/faceoff.js ---------------- */
 function faceoff(arg){ return P.faceoff.render(arg); }

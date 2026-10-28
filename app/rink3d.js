@@ -53,8 +53,37 @@ const R = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
 let DPR = Math.min(2, window.devicePixelRatio || 1);
 R.setPixelRatio(DPR);
 let quality = 2;                   /* 2 everything, 1 no reflection, 0 lean shadows and 1x pixels */
+const DPR0 = DPR; let qLock = false;
 R.setClearColor(0x070d17, 1); R.autoClear = false; R.info.autoReset = false;
 R.shadowMap.enabled = true; R.shadowMap.type = THREE.PCFShadowMap; R.shadowMap.autoUpdate = false;
+/* ---- colour: a linear, tone-mapped pipeline with sRGB out, like a broadcast camera.
+   Every material colour anybody writes (.color / .emissive hexes, painted canvases) is meant as an
+   sRGB colour, the way it looks on a web page. The shader patch below turns material colours into
+   linear light where the shader reads them, and colourMaps() marks every colour texture (map,
+   emissiveMap) sRGB, so nobody has to call convertSRGBToLinear() on a material colour (and must not:
+   it would be done twice). Vertex colours are NOT patched: they go in linear (the goalies convert
+   theirs when R.outputEncoding is sRGB). Light colours are converted here, in lin(). */
+R.outputEncoding = THREE.sRGBEncoding;
+R.toneMapping = THREE.ACESFilmicToneMapping; R.toneMappingExposure = 1;
+if(!THREE.__puckColour){
+  THREE.__puckColour = true;
+  for(const k of Object.keys(THREE.ShaderLib)){
+    const L = THREE.ShaderLib[k]; if(!L || typeof L.fragmentShader !== 'string') continue;
+    L.fragmentShader = L.fragmentShader
+      .replace('vec4 diffuseColor = vec4( diffuse, opacity );', 'vec4 diffuseColor = vec4( sRGBToLinear( vec4( diffuse, 1.0 ) ).rgb, opacity );')
+      .replace('vec3 totalEmissiveRadiance = emissive;', 'vec3 totalEmissiveRadiance = sRGBToLinear( vec4( emissive, 1.0 ) ).rgb;');
+  }
+}
+const lin = hex => new THREE.Color(hex).convertSRGBToLinear();
+const SRGB = THREE.sRGBEncoding;
+function colourMaps(root){
+  root.traverse(o => {
+    const ms = o.material; if(!ms) return;
+    for(const m of Array.isArray(ms) ? ms : [ms]) for(const k of ['map', 'emissiveMap']){
+      const t = m[k]; if(t && t.encoding !== SRGB){ t.encoding = SRGB; m.needsUpdate = true; }
+    }
+  });
+}
 const ANISO = Math.min(8, R.capabilities.getMaxAnisotropy());
 const scene = new THREE.Scene(); scene.fog = new THREE.Fog(0x070d17, 34, 95);
 const world = new THREE.Group(); scene.add(world);
@@ -62,16 +91,93 @@ const cam = new THREE.PerspectiveCamera(22, .8, .1, 160);
 const CAM0 = V(-.5, 1.9, 15), CAM1 = V(-.3, 1.72, 13.2), LOOK = V(0, .62, 0);
 cam.position.copy(CAM0); cam.lookAt(LOOK);
 
-world.add(new THREE.HemisphereLight(0xe4f0ff, 0x34404e, .78));
-const key = new THREE.DirectionalLight(0xffffff, 1.05); key.position.set(2.5, 16, 10); key.target.position.set(0, 0, 3);
+/* ---- the light: an NHL arena. Banks of lights all over the roof, so a man is lit evenly from above
+   and from every side at once, the white ice throwing light back up under his chin and helmet, the
+   stands dark. That is an environment map (built here, below), a near-overhead key that throws the
+   only real shadow (the skaters paint their own contact shadow under the skates: this one is the
+   soft pool of the roof), two more roof lights without shadows for the highlights from other
+   angles, and a cool light from the far end for an edge. The sweater card re-aims the same lights
+   into a studio three-point set (lightsFor). */
+const hemi = new THREE.HemisphereLight(lin(0xdfe8f5), lin(0x9aa6b4), .16); world.add(hemi);
+const key = new THREE.DirectionalLight(lin(0xfff6ea), .72); key.position.set(1.4, 20, 6.5); key.target.position.set(0, 0, 3);
 world.add(key, key.target);
-key.castShadow = true; key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -.0006; key.shadow.radius = 2.5;
+const KEYOFF = V(1.4, 20, 3.5);
+key.castShadow = true; key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -.0005; key.shadow.normalBias = .02; key.shadow.radius = 3;
 Object.assign(key.shadow.camera, { left: -14, right: 14, top: 17, bottom: -17, near: 2, far: 50 }); key.shadow.camera.updateProjectionMatrix();
-const rim = new THREE.DirectionalLight(0xb8d0ff, .5); rim.position.set(-5, 9, -8); world.add(rim);
-const fill = new THREE.DirectionalLight(0xfff2e0, .25); fill.position.set(6, 10, 30); world.add(fill);
+const rim = new THREE.DirectionalLight(lin(0xcfe0ff), .25); rim.position.set(-5, 12, -9); world.add(rim);
+const fill = new THREE.DirectionalLight(lin(0xfff4e6), .2); fill.position.set(7, 14, 24); world.add(fill);
+const roof = new THREE.DirectionalLight(lin(0xf4f8ff), .22); roof.position.set(-9, 18, 4); world.add(roof);
+
+/* the environment maps, made in code: an arena (roof light banks, dark stands, white ice) and a studio */
+const pmrem = new THREE.PMREMGenerator(R);
+function radiance(mat, x){ /* a colour that comes out of the sRGB patch as linear radiance x */
+  const s = v => v <= .0031308 ? v*12.92 : 1.055*Math.pow(v, 1/2.4) - .055;
+  mat.color.setRGB(s(x[0]), s(x[1]), s(x[2])); mat.toneMapped = false; return mat;
+}
+function envRoom(gain, build){
+  const es = new THREE.Scene(), geos = [], mats = [];
+  const add = (geo, x, y, z, rgb, ry = 0, rx = 0) => {
+    const m = radiance(new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }), rgb.map(v => v*gain)), me = new THREE.Mesh(geo, m);
+    me.position.set(x, y, z); me.rotation.set(rx, ry, 0); es.add(me); geos.push(geo); mats.push(m); return me;
+  };
+  build(add);
+  const rt = pmrem.fromScene(es, .035);
+  for(const g of geos) g.dispose(); for(const m of mats) m.dispose();
+  return rt.texture;
+}
+const arenaEnv = envRoom(.45, add => {
+  /* the bowl: dark stands all round, a darker roof, the ice a bright floor */
+  add(new THREE.BoxGeometry(90, 52, 90), 0, 24, 0, [.018, .02, .028]);
+  add(new THREE.PlaneGeometry(26, 60), 0, -1.2, 0, [.85, .9, .95], 0, -Math.PI/2);
+  add(new THREE.PlaneGeometry(60, 60), 0, -1.25, 0, [.05, .055, .065], 0, -Math.PI/2);
+  /* the boards: a white band round the ice */
+  for(const s of [-1, 1]){ add(new THREE.PlaneGeometry(60, 1.2), 0, -.6, s*30, [.55, .58, .62]); add(new THREE.PlaneGeometry(60, 1.2), s*13, -.6, 0, [.55, .58, .62], Math.PI/2); }
+  /* the roof: rows of light banks over the ice, a ring of them round the scoreboard */
+  for(let i = -2; i <= 2; i++) for(const s of [-1, 1]) add(new THREE.PlaneGeometry(9, 2.2), s*9, 22, i*11, [26, 26, 25], 0, Math.PI/2);
+  for(let k = 0; k < 8; k++){ const a = k/8*Math.PI*2; add(new THREE.PlaneGeometry(3, 1.4), Math.cos(a)*5, 21, Math.sin(a)*5, [20, 20, 19], -a, Math.PI/2); }
+  /* the scoreboard's glow and a few signs on the stands */
+  add(new THREE.BoxGeometry(5, 3, 5), 0, 13, 0, [.5, .55, .7]);
+  for(let k = 0; k < 6; k++){ const a = k/6*Math.PI*2 + .3; add(new THREE.PlaneGeometry(10, 1.2), Math.cos(a)*40, 6, Math.sin(a)*40, k % 2 ? [.6, .35, .1] : [.15, .25, .55], Math.PI/2 - a); }
+});
+const studioEnv = envRoom(.45, add => {
+  /* a dark grey room, a big soft box in front to one side, a smaller fill, two strips behind, a pale floor */
+  add(new THREE.BoxGeometry(40, 30, 40), 0, 10, 0, [.035, .038, .045]);
+  add(new THREE.PlaneGeometry(40, 40), 0, -1.4, 0, [.32, .34, .37], 0, -Math.PI/2);
+  add(new THREE.PlaneGeometry(6, 6), 5, 6, 8, [9, 8.8, 8.4], Math.atan2(5, 8));
+  add(new THREE.PlaneGeometry(6, 5), -7, 3, 7, [2.2, 2.3, 2.5], Math.atan2(-7, 7));
+  for(const s of [-1, 1]) add(new THREE.PlaneGeometry(1.2, 9), s*6, 4, -7, [7, 7.5, 8.5], Math.atan2(s*6, -7));
+  add(new THREE.PlaneGeometry(14, 6), 0, 14, 0, [1.6, 1.6, 1.6], 0, Math.PI/2);
+});
+scene.environment = arenaEnv;
+/* where every light points, and how strong: the arena (everything but the sweater card) or the studio */
+let lightSet = '';
+function lightsFor(kind){
+  if(kind === lightSet) return; lightSet = kind;
+  if(kind === 'studio'){
+    scene.environment = studioEnv; R.toneMappingExposure = 1;
+    hemi.intensity = .07; key.intensity = .7; rim.intensity = .6; fill.intensity = .18; roof.intensity = .12;
+    rim.position.set(-4, 5, -6); fill.position.set(-8, 3, 7); roof.position.set(5, 4, -6);
+  } else {
+    scene.environment = arenaEnv; R.toneMappingExposure = 1;
+    hemi.intensity = .16; key.intensity = .72; rim.intensity = .25; fill.intensity = .2; roof.intensity = .22;
+    rim.position.set(-5, 12, -9); fill.position.set(7, 14, 24); roof.position.set(-9, 18, 4);
+  }
+}
+lightsFor('arena');
+/* the quality ladder: 2 everything; 1 no reflection, a smaller, harder shadow; 0 no shadow, 1x pixels */
+function setQuality(q){
+  quality = q;
+  reflect = q === 2;
+  DPR = q === 2 ? DPR0 : q === 1 ? Math.min(DPR0, 1.5) : 1;
+  key.castShadow = q > 0;
+  const ms = q === 2 ? 2048 : 1024;
+  if(key.shadow.mapSize.x !== ms){ key.shadow.mapSize.set(ms, ms); if(key.shadow.map){ key.shadow.map.dispose(); key.shadow.map = null; } }
+  key.shadow.radius = q === 2 ? 3 : 1.5;
+  size();
+}
 
 function mesh(geo, mat, parent, x = 0, y = 0, z = 0){ const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; (parent || world).add(m); return m; }
-function canvasTex(w, h, draw){ const c = document.createElement('canvas'); c.width = w; c.height = h; if(draw) draw(c.getContext('2d'), w, h); const t = new THREE.CanvasTexture(c); t.anisotropy = ANISO; return t; }
+function canvasTex(w, h, draw){ const c = document.createElement('canvas'); c.width = w; c.height = h; if(draw) draw(c.getContext('2d'), w, h); const t = new THREE.CanvasTexture(c); t.anisotropy = ANISO; t.encoding = SRGB; return t; }
 /* small parts don't need to throw a shadow: it halves the shadow pass */
 function slim(root){ root.traverse(o => { if(o.isMesh){ if(!o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); if(o.geometry.boundingSphere.radius < .1) o.castShadow = false; } }); }
 
@@ -145,8 +251,13 @@ paintIce(null);
 const iceShape = new THREE.Shape(); rinkPath(0, 12).forEach((p, i) => i ? iceShape.lineTo(p.x, -p.z) : iceShape.moveTo(p.x, -p.z));
 const iceGeo = new THREE.ShapeGeometry(iceShape);
 { const pa = iceGeo.attributes.position, uv = new Float32Array(pa.count*2); for(let i = 0; i < pa.count; i++){ uv[i*2] = (pa.getX(i) + HX)/(2*HX); uv[i*2 + 1] = 1 - (-pa.getY(i) - ZN)/(ZS - ZN); } iceGeo.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); }
-const ice = new THREE.Mesh(iceGeo, new THREE.MeshStandardMaterial({ map: iceTex, roughness: .14, metalness: 0, transparent: true, opacity: .86 }));
+const ice = new THREE.Mesh(iceGeo, new THREE.MeshStandardMaterial({ map: iceTex, roughness: .12, metalness: 0, transparent: true, opacity: .89 }));
 ice.rotation.x = -Math.PI/2; ice.receiveShadow = true; world.add(ice);
+/* what the ice shows where nothing is reflected in it: drawn only in the mirrored pass, far up (so far
+   down once mirrored, behind every man and the boards), the pale blue-white of lit ice, so the ice reads white like on
+   TV and the reflections in it are faint ghosts rather than holes through to a dark sky */
+const underIce = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshBasicMaterial({ color: 0xbfcad6, fog: false, toneMapped: false, depthWrite: false, side: THREE.DoubleSide }));
+underIce.rotation.x = Math.PI/2; underIce.position.set(0, 8, ZC); underIce.visible = false; underIce.renderOrder = -10; world.add(underIce);
 
 /* ---- boards, glass, stanchions, crowd ---- */
 function boardTexture(){
@@ -260,7 +371,7 @@ function paintCube(){
   cubeTex.needsUpdate = true;
 }
 paintCube();
-for(let k = 0; k < 4; k++){ const f = mesh(new THREE.PlaneGeometry(5, 2.6), new THREE.MeshBasicMaterial({ map: cubeTex }), cube); f.rotation.y = k*Math.PI/2; f.position.set(Math.sin(k*Math.PI/2)*2.5, 0, Math.cos(k*Math.PI/2)*2.5); f.castShadow = false; }
+for(let k = 0; k < 4; k++){ const f = mesh(new THREE.PlaneGeometry(5, 2.6), new THREE.MeshBasicMaterial({ map: cubeTex, toneMapped: false }), cube); f.rotation.y = k*Math.PI/2; f.position.set(Math.sin(k*Math.PI/2)*2.5, 0, Math.cos(k*Math.PI/2)*2.5); f.castShadow = false; }
 mesh(new THREE.BoxGeometry(5.1, .5, 5.1), std(0x10161f, .5, .4), cube, 0, 1.55, 0).castShadow = false;
 mesh(new THREE.BoxGeometry(5.1, .5, 5.1), std(0x10161f, .5, .4), cube, 0, -1.55, 0).castShadow = false;
 crowd.push(cube);
@@ -643,8 +754,8 @@ const skaters = () => A[0].slice(1).concat(A[1].slice(1));
 /* the shootout's own shooter, so the duel never disturbs the match */
 const SO = makeSkater();
 /* rings on the ice: who has it, and who you are about to find */
-const ringC = new THREE.Mesh(new THREE.RingGeometry(.48, .58, 40), new THREE.MeshBasicMaterial({ color: 0xF2C230, transparent: true, opacity: .85, depthWrite: false })); ringC.rotation.x = -Math.PI/2; ringC.position.y = .012; world.add(ringC);
-const ringT = new THREE.Mesh(new THREE.RingGeometry(.5, .6, 40), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .7, depthWrite: false })); ringT.rotation.x = -Math.PI/2; ringT.position.y = .012; world.add(ringT); ringT.visible = false;
+const ringC = new THREE.Mesh(new THREE.RingGeometry(.48, .58, 40), new THREE.MeshBasicMaterial({ color: 0xF2C230, transparent: true, opacity: .85, depthWrite: false, toneMapped: false })); ringC.rotation.x = -Math.PI/2; ringC.position.y = .012; world.add(ringC);
+const ringT = new THREE.Mesh(new THREE.RingGeometry(.5, .6, 40), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .7, depthWrite: false, toneMapped: false })); ringT.rotation.x = -Math.PI/2; ringT.position.y = .012; world.add(ringT); ringT.visible = false;
 
 /* ===================================== THE SHOT =====================================
    One attempt is a function of u in 0..1, the shootout scene: skate in, a deke,
@@ -908,10 +1019,10 @@ const laneTex = canvasTex(32, 256, g => {
   g.globalCompositeOperation = 'destination-in'; const ed = g.createLinearGradient(0, 0, 32, 0); ed.addColorStop(0, 'rgba(0,0,0,0)'); ed.addColorStop(.35, '#000'); ed.addColorStop(.65, '#000'); ed.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = ed; g.fillRect(0, 0, 32, 256);
 });
 const lanes = [0, 1, 2, 3, 4].map(() => {
-  const g = new THREE.Group(), m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: laneTex, transparent: true, depthWrite: false, opacity: .7 }));
+  const g = new THREE.Group(), m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: laneTex, transparent: true, depthWrite: false, opacity: .7, toneMapped: false }));
   m.rotation.x = -Math.PI/2; g.add(m); g.visible = false; world.add(g); g.m = m; return g;
 });
-const markRings = [0, 1, 2, 3, 4].map(() => { const r = new THREE.Mesh(new THREE.RingGeometry(.4, .5, 32), new THREE.MeshBasicMaterial({ color: 0xff4a3d, transparent: true, opacity: .8, depthWrite: false })); r.rotation.x = -Math.PI/2; r.visible = false; world.add(r); return r; });
+const markRings = [0, 1, 2, 3, 4].map(() => { const r = new THREE.Mesh(new THREE.RingGeometry(.4, .5, 32), new THREE.MeshBasicMaterial({ color: 0xff4a3d, transparent: true, opacity: .8, depthWrite: false, toneMapped: false })); r.rotation.x = -Math.PI/2; r.visible = false; world.add(r); return r; });
 const iceMarks = () => lanes.concat(markRings, [ringC, ringT]);
 function placeLanes(t){
   const on = mode === 'match' && !!tagMode && !!carrier && !shotLive && camMode === 'play' && pk.state === 'carry';
@@ -1039,17 +1150,22 @@ let shadowWide = false;
 const Tt = V();
 function updateCam(dt, now, shotU){
   const r = reduced();
-  if(mode === 'lab'){ SK.labCam(cam, key, dt); return; }
+  if(mode !== 'show' && shadowWide === 'show'){ shadowWide = false; Object.assign(key.shadow.camera, { left: -14, right: 14, top: 17, bottom: -17, near: 2, far: 50 }); key.shadow.camera.updateProjectionMatrix(); }
+  if(mode === 'lab'){ SK.labCam(cam, key, dt); key.position.copy(key.target.position).add(KEYOFF); return; }
   if(mode === 'show'){
     const a = showCur + (r ? 0 : Math.sin(now/1000*.5)*.45);
     cam.position.set(Math.sin(a)*3.1, 1.45, 5.2 + Math.cos(a)*3.1); cam.lookAt(0, 1.0, 5.2); setFov(aspect < 1 ? 34 : 28);
-    key.target.position.set(0, 0, 5); key.position.set(2.5, 16, 12); key.target.updateMatrixWorld();
+    /* the studio: the key high and to the camera's right, the fill low on its left, the rims behind; they go round with the camera */
+    const ca = Math.cos(a), sa = Math.sin(a), at = (x, y, z) => V(ca*x + sa*z, y, 5.2 - sa*x + ca*z);
+    key.target.position.set(0, .9, 5.2); key.position.copy(at(2.6, 4.2, 3.4)); key.target.updateMatrixWorld();
+    if(shadowWide !== 'show'){ shadowWide = 'show'; Object.assign(key.shadow.camera, { left: -2.5, right: 2.5, top: 2.5, bottom: -2.5, near: 1, far: 14 }); key.shadow.camera.updateProjectionMatrix(); }
+    fill.position.copy(at(-3.2, 1.6, 2.6)).sub(key.target.position); rim.position.copy(at(-2.2, 2.6, -3.2)).sub(key.target.position); roof.position.copy(at(2.6, 2.4, -3)).sub(key.target.position);
     return;
   }
   if(mode === 'shootout'){
     const c = ease(clamp(shotU/K.shot));
     cam.position.copy(vl(CAM0, CAM1, c)); cam.position.z -= slow*1.1; cam.position.y += (aspect < 1 ? 1.2 : 0) - slow*.12; if(aspect < 1) cam.position.z += 2.2; cam.lookAt(LOOK); setFov(shotFov() - slow*1.5);
-    key.target.position.set(0, 0, 3); key.position.set(2.5, 16, 10); key.target.updateMatrixWorld();
+    key.target.position.set(0, 0, 3); key.position.copy(key.target.position).add(KEYOFF); key.target.updateMatrixWorld();
     return;
   }
   if(replaying){
@@ -1057,7 +1173,7 @@ function updateCam(dt, now, shotU){
     const sd = START[0] >= 0 ? 1 : -1, k = ease(clamp(shotClock/DUR)), port = aspect < 1;
     cam.position.set(sd*lerp(1.1, .5, k), lerp(2.6, 2.15, k), lerp(-3.1, -2.6, k));
     cam.lookAt(lerp(START[0], END[0], k)*.55, .45, lerp(port ? 5.4 : 5.8, port ? 2.9 : 3.2, k)); setFov(port ? lerp(56, 50, k) : lerp(34, 30, k));
-    key.target.position.set(0, 0, 3); key.position.set(2.5, 16, 10); key.target.updateMatrixWorld();
+    key.target.position.set(0, 0, 3); key.position.copy(key.target.position).add(KEYOFF); key.target.updateMatrixWorld();
     return;
   }
   const F = camHold ? camHold.clone() : focusPoint();
@@ -1099,10 +1215,10 @@ function updateCam(dt, now, shotU){
   if(lim < 1 && lim > 0){ pos.x = look.x + hx*lim; pos.z = look.z + hz*lim; pos.y = Math.max(pos.y, look.y + 2 + 6*(1 - lim)); }
   cam.position.copy(pos); cam.lookAt(look); setFov(fov);
   const kt = shotBlend > .5 ? V(0, 0, 3) : rig.T;
-  key.target.position.set(kt.x, 0, kt.z); key.position.set(kt.x + 3, 16, kt.z + 9); key.target.updateMatrixWorld();
+  key.target.position.set(kt.x, 0, kt.z); key.position.copy(key.target.position).add(KEYOFF); key.target.updateMatrixWorld();
   /* the overhead camera sees more ice than the shadow box covers: widen it while it is up */
   const wide = rig.el > .9;
-  if(wide !== shadowWide){ shadowWide = wide; Object.assign(key.shadow.camera, wide ? { left: -17, right: 17, top: 25, bottom: -25 } : { left: -14, right: 14, top: 17, bottom: -17 }); key.shadow.camera.updateProjectionMatrix(); }
+  if(wide !== shadowWide){ shadowWide = wide; Object.assign(key.shadow.camera, wide ? { left: -17, right: 17, top: 25, bottom: -25, near: 2, far: 50 } : { left: -14, right: 14, top: 17, bottom: -17, near: 2, far: 50 }); key.shadow.camera.updateProjectionMatrix(); }
 }
 
 /* ---- tags over the men: name and number, and while you choose what each pass costs and
@@ -1189,10 +1305,9 @@ function render(now){
   const t = now/1000, dt = Math.min(.25, t - lastT || .016); lastT = t;
   slowAvg = lerp(slowAvg, dt*1000, .03);
   /* a phone that can't keep up loses the reflection and some pixels first, then more: never frames */
-  if(++frames > 100 && slowAvg > 34 && quality > 0){
-    quality--; frames = 0; slowAvg = 20;
-    if(quality === 1){ reflect = false; DPR = Math.min(DPR, 1.5); } else { DPR = 1; key.castShadow = false; }
-    size(); if(api.onQuality) api.onQuality(quality);
+  if(++frames > 100 && slowAvg > 34 && quality > 0 && !qLock){
+    frames = 0; slowAvg = 20;
+    setQuality(quality - 1); if(api.onQuality) api.onQuality(quality);
   }
   let su = 0, shotOwns = false;
   if(mode === 'shootout' || shotLive){ su = runShot(now, t, dt); shotOwns = true; }
@@ -1215,13 +1330,14 @@ function render(now){
   if(Math.abs(inT - inTc) < .5) inTc = inT; if(Math.abs(inB - inBc) < .5) inBc = inB;
   applyOffset();
   updateCam(dt, now, su);
+  if(frames % 20 === 1) colourMaps(scene);
   R.info.reset();
   R.clear();
   const marks = iceMarks();
   if(reflect){
-    world.scale.y = -1; ice.visible = false; for(const m of crowd) m.visible = false; snowPts.visible = false; const mv = marks.map(m => m.visible); for(const m of marks) m.visible = false;
+    world.scale.y = -1; ice.visible = false; underIce.visible = true; for(const m of crowd) m.visible = false; snowPts.visible = false; const mv = marks.map(m => m.visible); for(const m of marks) m.visible = false;
     R.render(scene, cam);
-    world.scale.y = 1; ice.visible = true; for(const m of crowd) m.visible = true; snowPts.visible = true; marks.forEach((m, i) => { m.visible = mv[i]; }); R.clearDepth();
+    world.scale.y = 1; ice.visible = true; underIce.visible = false; for(const m of crowd) m.visible = true; snowPts.visible = true; marks.forEach((m, i) => { m.visible = mv[i]; }); R.clearDepth();
   }
   ringsOn();
   cube.visible = mode !== 'match' || rig.el < .95;
@@ -1262,6 +1378,7 @@ const wait = ms => new Promise(r => setTimeout(r, reduced() ? Math.min(ms, 500) 
 /* everyone on the ice in a match, only the duel's two in a shootout */
 function setMode(m){
   mode = m;
+  lightsFor(m === 'show' ? 'studio' : 'arena');
   if(replaying) endReplay(); celeEnd = null;
   for(const s of skaters()) s.boxed = false;
   for(const s of skaters()) s.root.visible = m === 'match';
@@ -1336,6 +1453,14 @@ const api = {
   /* draw calls and triangles of the last frame, for keeping an eye on phones */
   /* where the camera rig is, for tests */
   debug(){ const c = V(0, 0, ZC).project(cam), pk2 = puck.position.clone().project(cam); return { T: rig.T.toArray().map(v => +v.toFixed(2)), D: +rig.D.toFixed(2), yaw: +rig.yaw.toFixed(2), el: +rig.el.toFixed(2), fov: +cam.fov.toFixed(1), inT: Math.round(inTc), inB: Math.round(inBc), off: offApplied, mode, camMode, view, usr: { ...usr }, centre: [Math.round((c.x + 1)/2*W_), Math.round((1 - c.y)/2*H_)], puck: [Math.round((pk2.x + 1)/2*W_), Math.round((1 - pk2.y)/2*H_)] }; },
+  /* hold a quality level (lock) or hand it back to the frame-time watch; returns the level */
+  quality(q, lock){ if(q != null && q !== quality) setQuality(clamp(q|0, 0, 2)); if(lock != null) qLock = !!lock; return quality; },
+  /* dev: n frames drawn back to back, each waited out on the GPU (a 1-pixel read): median and 90th percentile ms */
+  bench(n = 40){
+    const gl = R.getContext(), px = new Uint8Array(4), t = []; let now = performance.now();
+    for(let i = 0; i < n; i++){ const a = performance.now(); render(now += 16.7); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); t.push(performance.now() - a); }
+    t.sort((a, b) => a - b); return { med: Math.round(t[n >> 1]*100)/100, p90: Math.round(t[Math.floor(n*.9)]*100)/100, calls: R.info.render.calls };
+  },
   stats(){ return { calls: R.info.render.calls, triangles: R.info.render.triangles, reflect, quality, dpr: R.getPixelRatio(), avgMs: Math.round(slowAvg*10)/10, w: W_, h: H_ }; },
   /* hooks for the screen: onLook(view) when the player moves the camera, onHit(scored) when the puck
      gets there, onPass(ok) as it leaves the stick, onCatch(ok) when it arrives, onQuality(level) */

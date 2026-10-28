@@ -41,8 +41,9 @@ const TIPS = [
 ];
 const FACTS = "The Canadiens have won 24 Stanley Cups · Alex Ovechkin passed Wayne Gretzky with his 895th goal in April 2025 · Sidney Crosby went first overall in the 2005 draft · Mario Lemieux went first overall in 1984 · The Original Six: BOS, CHI, DET, MTL, NYR, TOR · ";
 /* NHL: the stats centre (app/nhl/nhl-tab.js); its sub-pages (#nhl-standings, #nhl-team-MTL…) are all route "nhl" */
-const TABS = [["play", "#home"], ["pool", "#pool"], ["table", "#table"], ["nhl", "#nhl"], ["me", "#me"]];
-const TAB_OF = { home: "play", pool: "pool", table: "table", nhl: "nhl", me: "me" };
+/* T1: the password-locked training tab (app/train/train.js); #t1-<lesson> is a session, route "t1q" (no tab) */
+const TABS = [["play", "#home"], ["pool", "#pool"], ["table", "#table"], ["nhl", "#nhl"], ["me", "#me"], ["t1", "#t1"]];
+const TAB_OF = { home: "play", pool: "pool", table: "table", nhl: "nhl", me: "me", t1: "t1" };
 
 /* ---------- logos ---------- */
 function glowDefs(id){

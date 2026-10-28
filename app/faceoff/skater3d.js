@@ -2,12 +2,15 @@
 
    ONE SKINNED MESH PER MAN. Sweater, shoulder pads, hockey pants, socks over the
    shin guards, skates, gloves, helmet, face and stick are a single geometry in a
-   single draw call; the visor is a second one, because it is see-through. The
-   geometry is built once from lofted rings, lathes and extrusions and shared by
-   every man. What makes a man HIS is a 1024x1024 texture atlas painted from his
-   team's row in app/assets/kits.js with his name and number (the sweater keeps
-   the old lathe layout, so paintTorso/paintUpper/paintFore paint it unchanged),
-   and his own skeleton.
+   single draw call (the see-through visor, his shadows and the snow go last in
+   the same index). The geometry is built once from lofted rings, lathes and
+   extrusions and shared by every man: the sweater hangs in folds, blouses over
+   the pants and bunches at the elbows. The textures and the material are in
+   app/faceoff/skatertex.js: a team map shared by the whole team (the sweater keeps
+   the old lathe layout, so paintTorso/paintUpper/paintFore paint it unchanged), a
+   small map of his own (name and number in twill, his face, his stick), and
+   normal, roughness and mask maps shared by everyone. What else makes a man HIS
+   is his own skeleton.
 
    THE BONES ARE NOT IN THE SCENE GRAPH. Each is a matrix in the man's own space
    and the mesh skins 'detached', so the mirrored reflection pass, the shadow pass
@@ -194,17 +197,15 @@ function solve(R, Pz){
 
 /* ===================================== THE GEOMETRY =====================================
    Every vertex carries up to four bones. Tubes are lofted ring by ring in a bone's own
-   space and blend into the next bone near a joint; small rigid parts ride one bone. */
-const ATL = 1024;
-const rect = (x0, y0, w, h) => (u, v) => [(x0 + .75 + clamp(u)*(w - 1.5))/ATL, 1 - (y0 + .75 + (1 - clamp(v))*(h - 1.5))/ATL];
-const R_TORSO = rect(0, 0, 1024, 512), R_UPPER = rect(0, 512, 512, 256), R_FORE = rect(512, 512, 512, 256);
-const R_LEG = rect(0, 768, 128, 256), R_WAIST = rect(128, 768, 128, 128), R_SOCK = rect(256, 768, 128, 256);
+   space and blend into the next bone near a joint; small rigid parts ride one bone.
+   The atlas it maps onto (and the material) are in app/faceoff/skatertex.js. */
+const TX = P.skaterTex(T3, C);
+const ATL = TX.ATL, RX = TX.R, SW = TX.SW, swUV = TX.swUV;
+const R_TORSO = RX.torso, R_UPPER = RX.upper, R_FORE = RX.fore, R_LEG = RX.leg, R_WAIST = RX.waist, R_SOCK = RX.sock;
+const R_FACE = RX.face, R_HELM = RX.helm, R_BOOT = RX.boot, R_STICK = RX.stick, R_LACE = RX.lace;
+const R_CUFF = TX.rect([TX.L.glove[0], TX.L.glove[1], 256, 64]), R_HAND = TX.rect([TX.L.glove[0], TX.L.glove[1] + 64, 256, 64]);
 /* the see-through things, drawn with the visor: his shadow on the ice, the snow of a stop, the visor's tint */
-const FX_BLOB = rect(128, 896, 64, 64), FX_SNOW = rect(192, 896, 64, 64), FX_VIS = rect(128, 960, 64, 64);
-const R_FACE = rect(384, 768, 256, 256), R_HELM = rect(896, 768, 128, 128);
-const swPos = i => i < 16 ? [640 + (i % 4)*64, 768 + Math.floor(i/4)*64] : [896 + ((i - 16) % 2)*64, 896 + Math.floor((i - 16)/2)*64];
-const SW = { helm: 0, helmD: 1, glove: 2, cuff: 3, palm: 4, skin: 5, boot: 6, bootA: 7, holder: 8, steel: 9, shaft: 10, knob: 11, tape: 12, strap: 13, collar: 14, tongue: 15, lace: 16, hair: 17, accent: 18, rivet: 19 };
-const swUV = i => { const [x, y] = swPos(i); return [(x + 32)/ATL, 1 - (y + 32)/ATL]; };
+const FX_BLOB = RX.blob, FX_SNOW = RX.snow, FX_VIS = RX.vis;
 
 function Acc(){ return { p: [], n: [], uv: [], si: [], sw: [], ib: [], iv: [] }; }
 function normW(W){
@@ -220,7 +221,8 @@ function vert(A, p, n, uv, W){
 }
 /* a loft: rings = [{ y, rx, rz, cx, cz, n }] in the bone's space (y along it), seg round.
    o.M bone space -> bind space, o.th0 where u = 0 sits, o.uv(fu, fa, i, r) the atlas, fa the
-   fraction of the way round by arc length, o.w(lx, ly, lz, i, fu) the bones. */
+   fraction of the way round by arc length, o.w(lx, ly, lz, i, fu) the bones; o.shape(lx, ly, lz, th, i)
+   may move a point ([x, z] or [x, z, y]). Returns the points (bind space) and their normals. */
 function tube(A, rings, o){
   const seg = o.seg, nr = rings.length, Mx = o.M, grp = o.grp || 0, part = o.arc || 1, closed = part >= 1;
   const pts = [], loc = [], fa = [];
@@ -228,18 +230,18 @@ function tube(A, rings, o){
     const r = rings[i], e = 2/(r.n || 2), row = [], lrow = [], arc = [0];
     for(let j = 0; j <= seg; j++){
       const th = o.th0 + (j/seg)*TAU*part, s = Math.sin(th), c = Math.cos(th);
-      let lx = (r.cx || 0) + r.rx*Math.sign(s)*Math.pow(Math.abs(s), e), lz = (r.cz || 0) + r.rz*Math.sign(c)*Math.pow(Math.abs(c), e);
-      if(o.shape){ const q = o.shape(lx, r.y, lz, th, i); lx = q[0]; lz = q[1]; }
-      const lp = V(lx, r.y, lz); lrow.push(lp); row.push(lp.clone().applyMatrix4(Mx));
+      let lx = (r.cx || 0) + r.rx*Math.sign(s)*Math.pow(Math.abs(s), e), lz = (r.cz || 0) + r.rz*Math.sign(c)*Math.pow(Math.abs(c), e), ly = r.y;
+      if(o.shape){ const q = o.shape(lx, r.y, lz, th, i, j/seg); lx = q[0]; lz = q[1]; if(q.length > 2) ly = q[2]; }
+      const lp = V(lx, ly, lz); lrow.push(lp); row.push(lp.clone().applyMatrix4(Mx));
       if(j) arc.push(arc[j - 1] + Math.hypot(lx - lrow[j - 1].x, lz - lrow[j - 1].z));
     }
     const tot = arc[seg] || 1; fa.push(arc.map(a => a/tot)); pts.push(row); loc.push(lrow);
   }
   const det = Mx.determinant(), flip = det < 0;
-  const idx = [];
+  const idx = [], nrm = [];
   const tA = V(), tB = V(), nn = V();
   for(let i = 0; i < nr; i++){
-    const row = [];
+    const row = [], nrow = [];
     for(let j = 0; j <= seg; j++){
       const jm = closed ? (j === 0 ? seg - 1 : j - 1) : Math.max(0, j - 1), jp = closed ? (j === seg ? 1 : j + 1) : Math.min(seg, j + 1);
       tA.subVectors(pts[i][jp], pts[i][jm]);
@@ -247,9 +249,9 @@ function tube(A, rings, o){
       tB.subVectors(pts[i1][j], pts[i0][j]);
       nn.crossVectors(tA, tB); if(flip) nn.negate(); if(nn.lengthSq() < 1e-14) nn.set(0, 1, 0); nn.normalize();
       const l = loc[i][j], fu = j/seg;
-      row.push(vert(A, pts[i][j], nn, o.uv(fu, fa[i][j], i, rings[i]), o.w(l.x, l.y, l.z, i, fu)));
+      row.push(vert(A, pts[i][j], nn, o.uv(fu, fa[i][j], i, rings[i]), o.w(l.x, l.y, l.z, i, fu))); nrow.push(nn.clone());
     }
-    idx.push(row);
+    idx.push(row); nrm.push(nrow);
   }
   const out = grp ? A.iv : A.ib;
   for(let i = 0; i < nr - 1; i++) for(let j = 0; j < seg; j++){
@@ -263,22 +265,23 @@ function tube(A, rings, o){
     const ring = []; for(let j = 0; j <= seg; j++){ const l = loc[i][j]; ring.push(vert(A, pts[i][j], ax, o.uv(j/seg, fa[i][j], i, r), o.w(l.x, l.y, l.z, i, j/seg))); }
     for(let j = 0; j < seg; j++){
       const p0 = cen, p1 = pts[i][j], p2 = pts[i][j + 1];
-      const nrm = V().subVectors(p1, p0).cross(V().subVectors(p2, p0));
-      if(nrm.dot(ax) >= 0) out.push(c0, ring[j], ring[j + 1]); else out.push(c0, ring[j + 1], ring[j]);
+      const nrm2 = V().subVectors(p1, p0).cross(V().subVectors(p2, p0));
+      if(nrm2.dot(ax) >= 0) out.push(c0, ring[j], ring[j + 1]); else out.push(c0, ring[j + 1], ring[j]);
     }
   };
   if(o.cap0) cap(0, -1); if(o.cap1) cap(nr - 1, 1);
+  return { pts, nrm, fa };
 }
 /* a rigid part: any three.js geometry, in bone space by Ml, coloured by a swatch or mapped by uvf */
-function part(A, geo, bone, Mb, Ml, uvf, grp = 0){
-  const g = geo.index ? geo : geo;
+function part(A, geo, bone, Mb, Ml, uvf, grp = 0, W){
+  const g = geo;
   const pos = g.attributes.position, nor = g.attributes.normal, uv0 = g.attributes.uv;
   const Mx = new T3.Matrix4().multiplyMatrices(Mb, Ml), Nm = new T3.Matrix3().getNormalMatrix(Mx), flip = Mx.determinant() < 0;
   const base = [], p = V(), n = V();
   for(let k = 0; k < pos.count; k++){
     p.fromBufferAttribute(pos, k).applyMatrix4(Mx); n.fromBufferAttribute(nor, k).applyMatrix3(Nm).normalize();
     const uv = typeof uvf === 'function' ? uvf(uv0 ? uv0.getX(k) : 0, uv0 ? uv0.getY(k) : 0) : uvf;
-    base.push(vert(A, p, n, uv, [[bone, 1]]));
+    base.push(vert(A, p, n, uv, W || [[bone, 1]]));
   }
   const out = grp ? A.iv : A.ib;
   const tri = (a, b, c) => flip ? out.push(base[a], base[c], base[b]) : out.push(base[a], base[b], base[c]);
@@ -306,6 +309,11 @@ function spline(ctrl, k){
   }
   return out;
 }
+/* cloth: soft broad ridges with tight creases between */
+const fold = x => Math.abs(Math.sin(x));
+const gs = (x, w) => Math.exp(-(x/w)*(x/w));
+/* push a point of a ring out (or in) by d metres, away from the ring's centre */
+const pushOut = (lx, lz, cx, cz, d) => { const dx = lx - cx, dz = lz - cz, r = Math.hypot(dx, dz) || 1; return [lx + dx/r*d, lz + dz/r*d]; };
 
 /* the bind pose: standing straight, arms hanging a little out (an A) */
 function bindPose(){
@@ -338,10 +346,10 @@ function build(Mb, hi){
 
   /* ---------------- the sweater: a loose lathe over the shoulder pads, hem over the pants ---------------- */
   const torsoCtrl = [
-    { y: -.235, a: .228, b: .162, cz: .004, n: 2.2 },
-    { y: -.242, a: .246, b: .18, cz: .006, n: 2.2 },
-    { y: -.17, a: .243, b: .176, cz: .004, n: 2.2 },
-    { y: -.07, a: .232, b: .166, cz: .002, n: 2.3 },
+    { y: -.236, a: .232, b: .166, cz: .004, n: 2.2 },
+    { y: -.246, a: .25, b: .184, cz: .006, n: 2.2 },
+    { y: -.17, a: .245, b: .178, cz: .004, n: 2.2 },
+    { y: -.07, a: .233, b: .167, cz: .002, n: 2.3 },
     { y: .04, a: .219, b: .154, cz: -.004, n: 2.4 },
     { y: .15, a: .226, b: .157, cz: -.008, n: 2.5 },
     { y: .26, a: .248, b: .166, cz: -.011, n: 2.6 },
@@ -353,14 +361,30 @@ function build(Mb, hi){
     { y: .577, a: .104, b: .087, cz: .008, n: 2 },
     { y: .588, a: .076, b: .071, cz: .01, n: 2 }
   ];
-  const tr = spline(torsoCtrl, hi ? 2 : 1).map(r => ({ y: r.y, rx: r.a, rz: r.b, cz: r.cz, n: r.n }));
+  const tr = spline(torsoCtrl, hi ? 4 : 1).map(r => ({ y: r.y, rx: r.a, rz: r.b, cz: r.cz, n: r.n }));
   /* v: cloth from the hem, so the sweater's own centimetres (hem stripes, name, number, yoke) land where kits.js says */
   const backArc = [0]; for(let i = 1; i < tr.length; i++) backArc.push(backArc[i - 1] + Math.hypot(tr[i].y - tr[i - 1].y, (tr[i].rz + tr[i].cz) - (tr[i - 1].rz + tr[i - 1].cz)));
   const iSh = tr.reduce((bi, r, i) => Math.abs(r.y - .43) < Math.abs(tr[bi].y - .43) ? i : bi, 0);
   const hemI = tr.reduce((bi, r, i) => r.y < tr[bi].y ? i : bi, 0), cmAt = i => i <= hemI ? 0 : i <= iSh ? (backArc[i] - backArc[hemI])/(backArc[iSh] - backArc[hemI])*C.SHOULDER_CM : C.SHOULDER_CM + (backArc[i] - backArc[iSh])/(backArc[tr.length - 1] - backArc[iSh])*(C.PROF.total - C.SHOULDER_CM);
   /* u: round the body by arc length, the back and chest panels given more of the cloth so the number keeps its shape */
   const panel = f => f - .21/(4*PI)*Math.sin(4*PI*(f - .25));
-  tube(A, tr, { seg: seg(36), M: Mb[B.pel], th0: PI/2,
+  /* the cloth hangs: it blouses over the pants in rolls, drapes in long folds off the shoulder pads, gathers
+     under the arms, and the hem flares a little and is never quite level */
+  const torsoShape = (lx, ly, lz, th, i) => {
+    const u = ((th - PI/2)/TAU % 1 + 1) % 1, r = tr[i], side = Math.min(Math.abs(u - 0), Math.abs(u - .5), Math.abs(u - 1));
+    let d = 0, y = ly;
+    const wv = ly/.046*PI + 1.7*Math.sin(u*TAU*3 + .7) + .8*Math.sin(u*TAU*7 + 2.1);
+    d += .011*sst(-.245, -.2, ly)*sst(.06, -.04, ly)*(fold(wv) - .25);
+    const dr = u*TAU*4.5 + 1.1*Math.sin(ly*9 + u*21) + .6*Math.sin(u*TAU*11);
+    d += .0085*sst(.1, .24, ly)*sst(.41, .33, ly)*(.4 + .6*clamp(side/.1))*(fold(dr) - .3);
+    /* the hem: out a little, and wavy */
+    const hm = sst(-.19, -.246, ly);
+    d += .012*hm;
+    y += hm*(.007*Math.sin(u*TAU*3 + 1.3) + .004*Math.sin(u*TAU*7 + .4));
+    const q = pushOut(lx, lz, 0, r.cz, d);
+    return [q[0], q[1], y];
+  };
+  const torso = tube(A, tr, { seg: seg(hi ? 60 : 36), M: Mb[B.pel], th0: PI/2, shape: torsoShape,
     uv: (fu, fa, i) => R_TORSO(panel(fa), cmAt(i)/C.PROF.total),
     w: (x, y, z) => {
       const W = []; const sp = sst(-.06, .09, y), ch = sst(.1, .26, y), hm = .9*sst(.02, -.2, y);
@@ -371,13 +395,33 @@ function build(Mb, hi){
       if(wl > 0){ for(const w of W) w[1] *= 1 - wL - wR; W.push([B.th[0], wL], [B.th[1], wR]); }
       return W;
     } });
-  /* collar */
-  part(A, new T3.TorusGeometry(.073, .0075, 5, seg(24)), B.che, Mb[B.pel], mat4(0, .586, .01, PI/2, 0, 0, 1, .95, .7), swUV(SW.collar));
+  /* the collar: a knit band round the neck, its edge rolled */
+  tube(A, [{ y: .574, rx: .086, rz: .081, cz: .009 }, { y: .588, rx: .083, rz: .078, cz: .01 }, { y: .601, rx: .077, rz: .073, cz: .01 }, { y: .607, rx: .07, rz: .067, cz: .01 }, { y: .6, rx: .064, rz: .061, cz: .01 }],
+    { seg: seg(28), M: Mb[B.pel], th0: PI/2, uv: () => swUV(SW.collar), w: () => [[B.che, 1]] });
+  if(hi){
+    /* laces at the throat (drawn only for a lace-up collar: the atlas leaves them see-through otherwise) */
+    const fr = (cm, du) => {
+      let i = 0; while(i < tr.length - 1 && cmAt(i + 1) < cm) i++;
+      const ring = torso.fa[i]; let j = 0, best = 9;
+      ring.forEach((f, jj) => { const dd = Math.abs(panel(f) - (.25 + du)); if(dd < best){ best = dd; j = jj; } });
+      return torso.pts[i][j].clone().addScaledVector(torso.nrm[i][j], .004);
+    };
+    const tot = C.PROF.total;
+    for(let k = 0; k < 3; k++){
+      const c0 = tot - 2.5 - k*3.6, c1 = c0 - 3.2, w0 = .022*(1 - k*.22), w1 = .022*(1 - (k + 1)*.22);
+      for(const s of [-1, 1]){
+        const cv = new T3.CatmullRomCurve3([fr(c0, -s*w0), fr((c0 + c1)/2, 0), fr(c1, s*w1)]);
+        part(A, new T3.TubeGeometry(cv, 6, .0028, 4, false), B.che, new T3.Matrix4(), new T3.Matrix4(), (u, v) => R_LACE(u, v));
+      }
+    }
+    /* the fight strap: a short tab from inside the back of the hem down to the pants */
+    part(A, blob(.011, .02, .0022, 2.6, 8, 6), B.pel, Mb[B.pel], mat4(0, -.252, .166, -.3), swUV(SW.black), 0, [[B.hem, .6], [B.pel, .4]]);
+  }
 
   /* ---------------- neck and head ---------------- */
   const hd = Mb[B.hed], nk = Mb[B.nek];
   tube(A, [{ y: -.03, rx: .06, rz: .058 }, { y: .04, rx: .057, rz: .055 }, { y: .1, rx: .056, rz: .054 }, { y: .16, rx: .055, rz: .054 }], { seg: seg(12), M: nk, th0: PI/2,
-    uv: () => swUV(SW.skin), w: (x, y) => y < .05 ? [[B.che, sst(.05, -.03, y)], [B.nek, 1 - sst(.05, -.03, y)]] : [[B.nek, 1 - sst(.08, .15, y)], [B.hed, sst(.08, .15, y)]] });
+    uv: () => R_FACE(.5, .03), w: (x, y) => y < .05 ? [[B.che, sst(.05, -.03, y)], [B.nek, 1 - sst(.05, -.03, y)]] : [[B.nek, 1 - sst(.08, .15, y)], [B.hed, sst(.08, .15, y)]] });
   const headCtrl = [
     { y: -.032, a: .018, b: .022, cz: -.052 }, { y: -.026, a: .036, b: .04, cz: -.05 }, { y: -.01, a: .054, b: .058, cz: -.043 },
     { y: .012, a: .066, b: .078, cz: -.031 }, { y: .04, a: .073, b: .094, cz: -.022 }, { y: .072, a: .077, b: .101, cz: -.017 },
@@ -388,117 +432,157 @@ function build(Mb, hi){
   const hY0 = -.032, hY1 = .209;
   /* two halves: the front is the face, painted; the back is hair under the helmet */
   for(const front of [true, false]){
-    tube(A, hr, { seg: front ? (hi ? 18 : 6) : (hi ? 8 : 4), arc: .5, M: hd, th0: front ? PI/2 : 3*PI/2,
+    tube(A, hr, { seg: front ? (hi ? 22 : 6) : (hi ? 8 : 4), arc: .5, M: hd, th0: front ? PI/2 : 3*PI/2,
       shape: (lx, ly, lz, th) => {
-        /* the face: flatter across the cheeks, a nose, the brow over set-in eyes, cheekbones, a chin */
-        const fr = Math.max(0, -Math.cos(th)), da = th - PI, g = (x, w) => Math.exp(-(x/w)*(x/w));
+        /* the face: flatter across the cheeks, a nose, the brow over set-in eyes, cheekbones, lips, a chin */
+        const fr = Math.max(0, -Math.cos(th)), da = th - PI, g = gs;
         let dz = 0;
-        dz -= .019*g(da, .13)*g(ly - .05, .02)*(ly < .05 ? 1 : 1) + .008*g(da, .1)*g(ly - .075, .018);
+        dz -= .019*g(da, .13)*g(ly - .05, .02) + .008*g(da, .1)*g(ly - .075, .018);
+        dz += .002*g(da, .05)*g(ly - .04, .01);
         dz -= .007*g(da, .55)*g(ly - .097, .011);
         dz += .006*(g(da - .4, .16) + g(da + .4, .16))*g(ly - .078, .012);
         dz -= .004*(g(da - .62, .2) + g(da + .62, .2))*g(ly - .055, .02);
+        dz -= .003*g(da, .2)*g(ly - .019, .005) + .0025*g(da, .18)*g(ly - .009, .005);
         dz -= .006*g(da, .3)*g(ly + .02, .012);
         return [lx*(1 - .07*fr), lz + dz];
       },
-      uv: (fu, fa, i, r) => front ? R_FACE(fu, (r.y - hY0)/(hY1 - hY0)) : swUV(SW.hair),
+      uv: (fu, fa, i, r) => front ? R_FACE(fu, (r.y - hY0)/(hY1 - hY0)) : R_FACE(.5, .985),
       w: () => [[B.hed, 1]] });
   }
+  /* earlobes, under the ear guards */
+  if(hi) for(const s of [-1, 1]) part(A, blob(.007, .013, .011, 2.2, 6, 5), B.hed, hd, mat4(s*.071, .013, .004, 0, 0, s*.15), (u, v) => R_FACE(s > 0 ? .03 : .97, .28));
+
   /* ---------------- the helmet: shell, rim, ear guards, visor, chin strap ---------------- */
   /* a modern shell (the shape of a Bauer or a CCM): squarer than an egg across and over the top, a ridge
-     down the crown, longer at the back, the brow flared out over the visor */
-  const hc = V(0, .09, -.014), HA = .108, HB = .132, HC = .133, NE = 2.45;
-  const rimY = th => .07 - .045*Math.cos(th) + .006*Math.cos(2*th);
+     down the crown, two shells meeting down the sides, longer and flared at the back, the brow flared out
+     over the visor */
+  const hc = V(0, .09, -.014), HA = .108, HB = .132, HC = .135, NE = 2.6;
+  const rimY = th => .07 - .045*Math.cos(th) + .006*Math.cos(2*th) - .008*Math.max(0, Math.cos(th))*Math.max(0, Math.cos(th));
   const helmAt = (u, v, k = 1, dy = 0) => {
     const th = PI/2 + u*TAU, st = Math.sin(th), ct = Math.cos(th), back = Math.max(0, ct), front = Math.max(0, -ct);
     const r0 = clamp((rimY(th) + dy - hc.y)/HB, -1, 1), phi0 = Math.asin(Math.sign(r0)*Math.pow(Math.abs(r0), NE/2)), phi = lerp(phi0, PI/2, v);
-    const cp = se(Math.cos(phi), NE), flare = 1 + .06*front*front*(1 - sst(0, .3, v)) + .012*(1 - sst(0, .12, v));
-    const x = HA*se(st, 2.6)*cp*(1 + .03*back)*flare*k, z = hc.z + HC*se(ct, 2.25)*cp*(1 + .035*back)*flare*k;
-    return [x, hc.y + HB*se(Math.sin(phi), NE) + .006*Math.exp(-x*x/.0007)*sst(.2, .9, v), z];
+    const cp = se(Math.cos(phi), NE);
+    /* the brow flares over the visor, the back flares into a lip over the neck, a step where the shells meet */
+    const flare = 1 + .06*front*front*(1 - sst(0, .3, v)) + .012*(1 - sst(0, .12, v)) + .045*back*back*(1 - sst(0, .22, v));
+    const seamU = Math.min(Math.abs(u - .06), Math.abs(u - .44)), step = .006*sst(.02, .0, seamU)*sst(.85, .6, v)*(Math.sin(th) > 0 ? 1 : 1);
+    const x = HA*se(st, 2.7)*cp*(1 + .03*back)*flare*k*(1 + step), z = hc.z + HC*se(ct, 2.3)*cp*(1 + .035*back)*flare*k*(1 + step);
+    /* the ridge down the crown and two lower ridges either side of it */
+    const ridge = .007*Math.exp(-x*x/.0005)*sst(.15, .8, v) + .0025*(Math.exp(-Math.pow(Math.abs(x) - .042, 2)/.00008))*sst(.4, .85, v);
+    return [x, hc.y + HB*se(Math.sin(phi), NE) + ridge, z];
   };
-  surf(A, seg(32), hi ? 10 : 5, (u, v) => helmAt(u, v), hd, (u, v) => R_HELM(u, v), [[B.hed, 1]], hc);
-  /* the rim: a rubber lip, turned under */
-  surf(A, seg(32), 1, (u, v) => helmAt(u, 0, 1 - .065*v, -.003 + .007*v), hd, () => swUV(SW.helmD), [[B.hed, 1]], hc);
+  surf(A, seg(40), hi ? 14 : 5, (u, v) => helmAt(u, v), hd, (u, v) => R_HELM(u, v), [[B.hed, 1]], hc);
+  /* the rim: a rubber lip, turned under, and the black foam liner showing inside it */
+  surf(A, seg(40), hi ? 2 : 1, (u, v) => helmAt(u, 0, 1 - .075*v, -.003 + .008*v), hd, () => swUV(SW.liner), [[B.hed, 1]], hc);
   if(hi){
-    /* ear guards and the clips that hold the visor */
+    /* ear guards: a moulded cup with a lip, holes over the ear, the clip that holds them */
     for(const s of [-1, 1]){
-      part(A, blob(.017, .04, .038, 2.6, 10, 8), B.hed, hd, mat4(s*.103, .048, -.006, 0, 0, s*.1), swUV(SW.helm));
-      part(A, blob(.007, .013, .013, 2, 6, 5), B.hed, hd, mat4(s*.114, .098, -.072), swUV(SW.helmD));
+      const uS = s > 0 ? .015 : .485;
+      part(A, blob(.014, .041, .039, 2.8, 12, 9), B.hed, hd, mat4(s*.104, .046, -.004, 0, 0, s*.1), (u, v) => R_HELM(uS, .12));
+      part(A, new T3.TorusGeometry(.036, .0035, 4, 14), B.hed, hd, mat4(s*.112, .046, -.004, 0, PI/2, 0, 1, 1.1, 1), (u, v) => R_HELM(uS, .14));
+      for(const [dy, dz] of [[.012, 0], [-.004, .006], [-.004, -.006], [.004, .016], [.004, -.016]]) part(A, blob(.003, .0045, .0045, 2, 5, 4), B.hed, hd, mat4(s*.1185, .046 + dy, -.004 + dz), swUV(SW.earHole));
+      /* the visor's clip at the temple, its screw */
+      part(A, blob(.006, .016, .013, 2.6, 8, 6), B.hed, hd, mat4(s*.116, .088, -.07, 0, 0, s*.12), swUV(SW.black));
+      part(A, new T3.CylinderGeometry(.0042, .0042, .004, 8), B.hed, hd, mat4(s*.1225, .088, -.07, 0, 0, PI/2), swUV(SW.rivet));
+      /* the chin strap's buckle below the ear */
+      part(A, blob(.008, .011, .004, 2.6, 6, 4), B.hed, hd, mat4(s*.088, .002, -.014, .2, 0, s*.25), swUV(SW.black));
     }
-    /* chin strap */
-    const strap = new T3.CatmullRomCurve3([V(-.09, .03, -.01), V(-.07, -.01, -.035), V(-.03, -.036, -.058), V(0, -.04, -.062), V(.03, -.036, -.058), V(.07, -.01, -.035), V(.09, .03, -.01)]);
-    part(A, new T3.TubeGeometry(strap, 14, .0045, 4, false), B.hed, hd, new T3.Matrix4(), swUV(SW.strap));
-    /* the visor: clear, from the brow to the tip of the nose, wrapped round */
-    const vis = [];
-    for(let i = 0; i <= 1; i++) vis.push({ y: lerp(.032, .118, i), rx: 1, rz: 1 });
-    const vg = new T3.BufferGeometry(), vp = [], vn = [], vu = [], vi = [], N = 16;
-    for(let i = 0; i <= 1; i++) for(let j = 0; j <= N; j++){
-      const th = lerp(PI - 1.32, PI + 1.32, j/N), y = lerp(.03, .118, i), out = 1 + .07*(1 - i);
-      const x = Math.sin(th)*(HA + .012)*out, z = hc.z + Math.cos(th)*(HC + .006)*out;
-      vp.push(x, y, z); vn.push(Math.sin(th), .1*(1 - i), Math.cos(th)); vu.push(j/N, i);
+    /* chin strap and cup */
+    const strap = new T3.CatmullRomCurve3([V(-.095, .035, -.012), V(-.086, .004, -.016), V(-.068, -.022, -.036), V(-.034, -.04, -.058), V(0, -.045, -.064), V(.034, -.04, -.058), V(.068, -.022, -.036), V(.086, .004, -.016), V(.095, .035, -.012)]);
+    part(A, new T3.TubeGeometry(strap, 20, .0042, 4, false), B.hed, hd, mat4(0, 0, 0, 0, 0, 0, 1, 1, 1), swUV(SW.strap));
+    part(A, blob(.021, .014, .011, 2.4, 10, 7), B.hed, hd, mat4(0, -.043, -.06, .5), swUV(SW.visEdge));
+    /* the visor: clear, from the brow to the tip of the nose, wrapped round and bowed out a little */
+    const vg = new T3.BufferGeometry(), vp = [], vn = [], vu = [], vi = [], N = 22, NR = 3;
+    for(let i = 0; i <= NR; i++) for(let j = 0; j <= N; j++){
+      const t = i/NR, th = lerp(PI - 1.34, PI + 1.34, j/N), y = lerp(.03, .118, t), out = 1 + .072*(1 - t) + .012*Math.sin(t*PI);
+      const x = Math.sin(th)*(HA + .012)*out, z = hc.z + Math.cos(th)*(HC + .004)*out;
+      vp.push(x, y, z); vn.push(Math.sin(th), .12*(1 - t), Math.cos(th)); vu.push(j/N, t);
     }
-    for(let j = 0; j < N; j++){ const a = j, b = j + 1, c = N + 2 + j, d = N + 1 + j; vi.push(a, c, b, a, d, c); }
+    for(let i = 0; i < NR; i++) for(let j = 0; j < N; j++){ const a = i*(N + 1) + j, b = a + 1, c = a + N + 2, d = a + N + 1; vi.push(a, c, b, a, d, c); }
     vg.setAttribute('position', new T3.Float32BufferAttribute(vp, 3)); vg.setAttribute('normal', new T3.Float32BufferAttribute(vn, 3)); vg.setAttribute('uv', new T3.Float32BufferAttribute(vu, 2)); vg.setIndex(vi);
     part(A, vg, B.hed, hd, new T3.Matrix4(), (u, v) => FX_VIS(u, v), 1);
     /* the visor's lower edge trim */
-    const edge = new T3.CatmullRomCurve3([...Array(9)].map((_, j) => { const th = lerp(PI - 1.3, PI + 1.3, j/8); return V(Math.sin(th)*(HA + .012)*1.07, .031, hc.z + Math.cos(th)*(HC + .006)*1.07); }));
-    part(A, new T3.TubeGeometry(edge, 16, .0022, 3, false), B.hed, hd, new T3.Matrix4(), swUV(SW.helmD));
+    const edge = new T3.CatmullRomCurve3([...Array(11)].map((_, j) => { const th = lerp(PI - 1.32, PI + 1.32, j/10); return V(Math.sin(th)*(HA + .012)*1.072, .031, hc.z + Math.cos(th)*(HC + .004)*1.072); }));
+    part(A, new T3.TubeGeometry(edge, 20, .0024, 4, false), B.hed, hd, new T3.Matrix4(), swUV(SW.visEdge));
   }
 
-  /* ---------------- arms: sleeves over shoulder caps and elbow pads ---------------- */
+  /* ---------------- arms: sleeves over shoulder caps and elbow pads, bunched at the elbow ---------------- */
   for(let i = 0; i < 2; i++){
     const s = i ? 1 : -1, bu = B.ua[i], bf = B.fa[i];
     const thU = thOf(bu, V(s, 0, 0)) - PI/2, thF = thOf(bf, V(s, 0, 0)) - PI/2;
     const up = spline([
-      { y: -.095, r: .014 }, { y: -.082, r: .062 }, { y: -.055, r: .094 }, { y: -.015, r: .103 }, { y: .035, r: .097 }, { y: .1, r: .086 },
-      { y: .18, r: .079 }, { y: .245, r: .078 }, { y: .29, r: .083 }, { y: .318, r: .085 }, { y: .345, r: .078 }
-    ], hi ? 2 : 1).map(r => ({ y: r.y, rx: r.r, rz: r.r*.97 }));
-    tube(A, up, { seg: seg(18), M: Mb[bu], th0: thU,
+      { y: -.072, r: .01 }, { y: -.064, r: .036 }, { y: -.042, r: .066 }, { y: -.012, r: .09 }, { y: .035, r: .095 }, { y: .1, r: .087 },
+      { y: .18, r: .081 }, { y: .245, r: .08 }, { y: .29, r: .085 }, { y: .318, r: .087 }, { y: .345, r: .08 }
+    ], hi ? 3 : 1).map(r => ({ y: r.y, rx: r.r, rz: r.r*.97 }));
+    tube(A, up, { seg: seg(24), M: Mb[bu], th0: thU,
+      shape: (lx, ly, lz, th) => {
+        const e = sst(.2, .3, ly)*sst(.36, .33, ly), lng = sst(.0, .08, ly)*sst(.3, .2, ly);
+        const d = .0055*e*(fold(ly/.019*PI + 1.5*Math.sin(th*2 + .4)) - .3) + .0035*lng*(fold(th*3 + 2.2*Math.sin(ly*14)) - .4);
+        return pushOut(lx, lz, 0, 0, d);
+      },
       uv: (fu, fa, k, r) => R_UPPER(fu, clamp(r.y/.33)),
-      w: (x, y) => { const c = .55*sst(.0, -.085, y), e = .5*sst(.27, .345, y); return [[B.che, c], [bu, 1 - c - e], [bf, e]]; } });
+      w: (x, y) => { const c = .45*sst(.01, -.075, y), e = .5*sst(.27, .345, y); return [[B.che, c], [bu, 1 - c - e], [bf, e]]; } });
     const fo = spline([
-      { y: -.045, r: .074 }, { y: -.012, r: .086 }, { y: .02, r: .087 }, { y: .06, r: .08 }, { y: .12, r: .073 }, { y: .2, r: .066 }, { y: .24, r: .064 }, { y: .262, r: .063 }
-    ], hi ? 2 : 1).map(r => ({ y: r.y, rx: r.r, rz: r.r*.95 }));
-    tube(A, fo, { seg: seg(16), M: Mb[bf], th0: thF,
+      { y: -.045, r: .076 }, { y: -.012, r: .088 }, { y: .02, r: .089 }, { y: .06, r: .082 }, { y: .12, r: .075 }, { y: .2, r: .068 }, { y: .24, r: .066 }, { y: .262, r: .065 }
+    ], hi ? 3 : 1).map(r => ({ y: r.y, rx: r.r, rz: r.r*.95 }));
+    tube(A, fo, { seg: seg(22), M: Mb[bf], th0: thF,
+      shape: (lx, ly, lz, th) => {
+        const e = sst(-.05, -.03, ly)*sst(.09, .04, ly), lng = sst(.06, .12, ly);
+        const d = .006*e*(fold(ly/.021*PI + 1.3*Math.sin(th*2 + 1.1)) - .3) + .003*lng*(fold(th*2.5 + 1.8*Math.sin(ly*12)) - .4);
+        return pushOut(lx, lz, 0, 0, d);
+      },
       uv: (fu, fa, k, r) => R_FORE(fu, 1 - (FA - r.y)/.34),
       w: (x, y) => { const e = .5*sst(.03, -.04, y); return [[bu, e], [bf, 1 - e]]; } });
   }
-  /* ---------------- gloves: fist round the shaft, finger rolls, thumb, gauntlet ---------------- */
+  /* ---------------- gloves: fist round the shaft, segmented finger rolls, thumb, padded back, gauntlet ---------------- */
+  const handUV = (u, v) => R_HAND(u, v);
   for(let i = 0; i < 2; i++){
     const bh = B.hd[i], Mh = Mb[bh], mz = i ? 1 : -1;   /* the left glove is the right one mirrored */
     const GS = 1.32, L = (x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) => new T3.Matrix4().makeScale(GS, GS, GS*mz).multiply(mat4(x, y, z, rx, ry, rz, sx, sy, sz));
-    const CM = new T3.Matrix4().multiplyMatrices(Mh, new T3.Matrix4().makeScale(1, 1, mz));
     if(hi){
-      part(A, blob(.05, .042, .043, 3.2, 10, 7), bh, Mh, L(0, -.006, -.006), swUV(SW.glove));
+      /* the palm and the fist's core */
+      part(A, blob(.05, .042, .043, 3.2, 12, 8), bh, Mh, L(0, -.006, -.006), handUV);
+      /* the fingers: each two rolls, the far one round the shaft */
       for(let f = 0; f < 4; f++){
-        const x = -.04 + f*.0265, r = .035 - (f === 0 ? .004 : 0);
-        part(A, new T3.TorusGeometry(r, .0142, 5, 8, 3.35), bh, Mh, L(x, 0, 0, 0, PI/2, 0).multiply(mat4(0, 0, 0, 0, 0, -.25)), swUV(SW.glove));
+        const x = -.04 + f*.0265, r = .035 - (f === 0 ? .004 : 0) - (f === 3 ? .002 : 0);
+        part(A, new T3.TorusGeometry(r, .0148, 6, 10, 1.75), bh, Mh, L(x, 0, 0, 0, PI/2, 0).multiply(mat4(0, 0, 0, 0, 0, -.25)), (u, v) => R_HAND(u*.5, v));
+        part(A, new T3.TorusGeometry(r, .0138, 6, 8, 1.55), bh, Mh, L(x, 0, 0, 0, PI/2, 0).multiply(mat4(0, 0, 0, 0, 0, -.25 + 1.8)), (u, v) => R_HAND(.5 + u*.5, v));
       }
-      part(A, blob(.052, .042, .021, 3, 8, 6), bh, Mh, L(0, -.045, -.035, .12), swUV(SW.glove));
-      part(A, blob(.048, .012, .006, 2.6, 8, 6), bh, Mh, L(0, -.04, -.056, .12), swUV(SW.cuff));
-      part(A, blob(.034, .017, .018, 2.4, 8, 6), bh, Mh, L(.062, -.012, .026, 0, .15, .35), swUV(SW.glove));
-    } else part(A, blob(.06, .055, .05, 3, 8, 6), bh, Mh, L(0, -.02, 0), swUV(SW.glove));
+      /* the back of the hand: two padded rolls over the knuckles, then the backhand panel */
+      part(A, blob(.054, .02, .016, 2.6, 10, 6), bh, Mh, L(0, -.026, -.04, .1), handUV);
+      part(A, blob(.052, .022, .02, 3, 10, 6), bh, Mh, L(0, -.052, -.034, .16), handUV);
+      part(A, blob(.048, .012, .006, 2.6, 8, 6), bh, Mh, L(0, -.04, -.057, .12), swUV(SW.palm));
+      /* the thumb: two rolls along the shaft */
+      part(A, blob(.03, .016, .017, 2.4, 10, 6), bh, Mh, L(.058, -.014, .027, 0, .15, .35), handUV);
+      part(A, blob(.022, .014, .015, 2.4, 8, 6), bh, Mh, L(.086, -.002, .032, 0, .1, .2), handUV);
+    } else part(A, blob(.06, .055, .05, 3, 8, 6), bh, Mh, L(0, -.02, 0), handUV);
     /* the gauntlet rides the forearm (the wrist bends inside it): wide and open over the end of the sleeve,
-       a band of the glove's colour at the top, its end tucked into the fist */
+       a rolled edge, a band of the second colour, its end tucked into the fist */
     const bf = B.fa[i], Mf = Mb[bf], cw = (x, y) => { const h = .55*sst(FA - .03, FA + .04, y); return [[bf, 1 - h], [bh, h]]; };
-    tube(A, [{ y: FA - .142, rx: .078, rz: .075 }, { y: FA - .156, rx: .09, rz: .087 }, { y: FA - .148, rx: .096, rz: .092 }], { seg: seg(16), M: Mf, th0: 0, uv: () => swUV(SW.cuff), w: cw });
-    tube(A, [{ y: FA - .148, rx: .096, rz: .092 }, { y: FA - .112, rx: .093, rz: .089 }], { seg: seg(16), M: Mf, th0: 0, uv: () => swUV(SW.glove), w: cw });
-    tube(A, [{ y: FA - .112, rx: .093, rz: .089 }, { y: FA - .055, rx: .085, rz: .081 }, { y: FA - .005, rx: .075, rz: .072 }, { y: FA + .03, rx: .066, rz: .064 }, { y: FA + .045, rx: .053, rz: .051 }], { seg: seg(16), M: Mf, th0: 0, uv: () => swUV(SW.cuff), w: cw });
+    const g0 = FA - .158, g1 = FA + .045;
+    const cuffR = [{ y: FA - .142, rx: .079, rz: .076 }, { y: FA - .158, rx: .09, rz: .087 }, { y: FA - .156, rx: .097, rz: .093 }, { y: FA - .146, rx: .098, rz: .094 },
+      { y: FA - .112, rx: .094, rz: .09 }, { y: FA - .055, rx: .086, rz: .082 }, { y: FA - .005, rx: .076, rz: .073 }, { y: FA + .03, rx: .066, rz: .064 }, { y: FA + .045, rx: .053, rz: .051 }];
+    tube(A, cuffR, { seg: seg(20), M: Mf, th0: 0,
+      shape: (lx, ly, lz, th) => { const d = .0025*sst(FA - .1, FA - .14, ly)*Math.cos(th*3); return pushOut(lx, lz, 0, 0, d); },
+      uv: (fu, fa, k, r) => R_CUFF(fu, clamp((r.y - g0)/(g1 - g0))), w: cw });
   }
 
   /* ---------------- hockey pants: a shell round the seat, two wide legs ---------------- */
   tube(A, spline([
     { y: .04, a: .2, b: .136, cz: .0 }, { y: -.03, a: .212, b: .145, cz: .004 }, { y: -.1, a: .218, b: .15, cz: .006 },
     { y: -.17, a: .216, b: .15, cz: .008 }, { y: -.215, a: .19, b: .135, cz: .008 }, { y: -.228, a: .03, b: .03, cz: .008 }
-  ], hi ? 2 : 1).map(r => ({ y: r.y, rx: r.a, rz: r.b, cz: r.cz, n: 2.3 })).reverse(), { seg: seg(30), M: Mb[B.pel], th0: PI/2,
+  ], hi ? 2 : 1).map(r => ({ y: r.y, rx: r.a, rz: r.b, cz: r.cz, n: 2.3 })).reverse(), { seg: seg(32), M: Mb[B.pel], th0: PI/2,
     uv: (fu, fa, i, r) => R_WAIST(fa, (r.y + .228)/.268),
     w: (x, y) => { const l = .35*sst(-.08, -.2, y)*clamp(Math.abs(x)/.08); return [[B.pel, 1 - l], [B.th[x < 0 ? 0 : 1], l]]; } });
   for(let i = 0; i < 2; i++){
     const s = i ? 1 : -1, bt = B.th[i], th0 = thOf(bt, V(s, 0, 0)) - PI/2, out = dirIn(bt, V(s, 0, 0)), fw = dirIn(bt, V(0, 0, -1));
     const legR = spline([
       { y: -.11, r: .086, o: .0 }, { y: -.05, r: .112, o: .004 }, { y: .02, r: .138, o: .013 }, { y: .1, r: .139, o: .017 }, { y: .18, r: .134, o: .017 },
-      { y: .25, r: .129, o: .015 }, { y: .315, r: .126, o: .014 }, { y: .328, r: .119, o: .014 }, { y: .316, r: .11, o: .014 }
+      { y: .25, r: .129, o: .015 }, { y: .3, r: .127, o: .014 }, { y: .322, r: .124, o: .014 }, { y: .332, r: .117, o: .014 }, { y: .318, r: .108, o: .014 }
     ], hi ? 2 : 1);
-    tube(A, legR.map(r => ({ y: r.y, rx: r.r, rz: r.r*1.04, cx: out.x*r.o + fw.x*.008, cz: out.z*r.o + fw.z*.008, n: 2.9 })), { seg: seg(22), M: Mb[bt], th0,
+    tube(A, legR.map(r => ({ y: r.y, rx: r.r, rz: r.r*1.04, cx: out.x*r.o + fw.x*.008, cz: out.z*r.o + fw.z*.008, n: 2.9 })), { seg: seg(26), M: Mb[bt], th0,
+      shape: (lx, ly, lz, th, k) => { const r = legR[k]; const cx = out.x*r.o + fw.x*.008, cz = out.z*r.o + fw.z*.008;
+        /* the padded panels bulge a little between their seams */
+        const d = .003*Math.pow(Math.abs(Math.sin(th*2)), .7)*sst(-.06, .02, ly)*sst(.33, .29, ly); return pushOut(lx, lz, cx, cz, d); },
       uv: (fu, fa, k, r) => R_LEG(fu, 1 - (r.y + .11)/.44),
       /* the top of the leg stays with the hips (it is the same pair of breezers), so a high knee doesn't lever it out through the sweater */
       w: (x, y) => { const p = sst(.09, -.07, y); return [[B.pel, p], [bt, 1 - p]]; } });
@@ -511,7 +595,7 @@ function build(Mb, hi){
       { y: .09, r: .071, f: .014, d: 1.11 }, { y: .18, r: .066, f: .012, d: 1.09 }, { y: .28, r: .061, f: .009, d: 1.07 }, { y: .36, r: .056, f: .005, d: 1.04 },
       { y: .43, r: .05, f: .0, d: 1 }
     ], hi ? 2 : 1);
-    tube(A, sk.map(r => ({ y: r.y, rx: r.r, rz: r.r*r.d, cx: fw.x*r.f, cz: fw.z*r.f, n: 2.2 })), { seg: seg(18), M: Mb[bs], th0: thOf(bs, V(i ? 1 : -1, 0, 0)) - PI/2,
+    tube(A, sk.map(r => ({ y: r.y, rx: r.r, rz: r.r*r.d, cx: fw.x*r.f, cz: fw.z*r.f, n: 2.2 })), { seg: seg(20), M: Mb[bs], th0: thOf(bs, V(i ? 1 : -1, 0, 0)) - PI/2,
       uv: (fu, fa, k, r) => R_SOCK(fu, (.43 - r.y)/.61),
       w: (x, y) => { const t = sst(.03, -.07, y); return [[B.th[i], t], [bs, 1 - t]]; } });
   }
@@ -524,25 +608,27 @@ function build(Mb, hi){
       { y: .04, w: .045, f: .068, b: .085, n: 2.2 }, { y: .06, w: .047, f: .063, b: .083, n: 2.2 }, { y: .076, w: .05, f: .064, b: .085, n: 2.2 }, { y: .073, w: .046, f: .058, b: .079, n: 2.2 }
     ];
     const bootR = boot.map(r => ({ y: r.y, rx: r.w, rz: 1, n: r.n, f: r.f, b: r.b }));
-    tube(A, bootR, { seg: seg(24), M: Mf, th0: PI/2,
+    tube(A, bootR, { seg: seg(28), M: Mf, th0: PI/2,
       shape: (lx, ly, lz, th, k) => { const r = bootR[k], c = Math.cos(th), e = 2/r.n; return [lx, Math.sign(c)*Math.pow(Math.abs(c), e)*(c > 0 ? r.b : r.f) - .012]; },
-      uv: () => swUV(SW.boot), w: () => [[bf, 1]], cap0: true });
+      uv: (fu, fa, k) => R_BOOT(fu, clamp(k/(bootR.length - 2))), w: () => [[bf, 1]], cap0: true });
     if(hi){
-      /* the quarter panel's trim and the toe cap */
-      tube(A, [{ y: -.004, rx: 1, rz: 1 }, { y: .008, rx: 1, rz: 1 }], { seg: seg(24), M: Mf, th0: PI/2,
+      /* the quarter panel's trim, the tongue (felt, standing up out of the boot), the tendon guard */
+      tube(A, [{ y: -.004, rx: 1, rz: 1 }, { y: .008, rx: 1, rz: 1 }], { seg: seg(28), M: Mf, th0: PI/2,
         shape: (lx, ly, lz, th) => { const r = ly < 0 ? bootR[4] : bootR[5], k = ly < 0 ? 0 : 1, c = Math.cos(th), e = 2/r.n, sc = 1.012, rb = lerp(.093, .088, k), rf = lerp(.118, .09, k);
           return [Math.sign(Math.sin(th))*Math.pow(Math.abs(Math.sin(th)), e)*r.rx*sc, Math.sign(c)*Math.pow(Math.abs(c), e)*(c > 0 ? rb : rf)*sc - .012]; },
-        uv: () => swUV(SW.bootA), w: () => [[bf, 1]] });
-      part(A, blob(.034, .052, .009, 2.8, 8, 8), bf, Mf, mat4(0, .1, -.072, -.28), swUV(SW.tongue));
-      part(A, blob(.02, .042, .007, 2.6, 8, 8), bf, Mf, mat4(0, .1, .072, .32), swUV(SW.boot));
-      part(A, blob(.018, .004, .045, 2.6, 6, 4), bf, Mf, mat4(0, .036, -.086, -.18), swUV(SW.lace));
+        uv: () => swUV(SW.sole), w: () => [[bf, 1]] });
+      part(A, blob(.036, .056, .01, 2.8, 10, 8), bf, Mf, mat4(0, .104, -.072, -.3), swUV(SW.tongue));
+      part(A, blob(.031, .02, .012, 2.6, 8, 6), bf, Mf, mat4(0, .148, -.09, -.45), swUV(SW.black));
+      part(A, blob(.021, .045, .008, 2.6, 8, 8), bf, Mf, mat4(0, .104, .073, .32), (u, v) => R_BOOT(.75, .92));
+      /* the laces' bow, tucked at the top */
+      part(A, blob(.014, .004, .01, 2.4, 6, 4), bf, Mf, mat4(0, .085, -.081, -.3), swUV(SW.white));
     }
     /* holder and runner, from side profiles */
     const hs = new T3.Shape();
     const hp = [[-.142, -.098], [.118, -.098], [.124, -.088], [.104, -.06], [.04, -.06], [.03, -.078], [-.05, -.08], [-.075, -.062], [-.13, -.06], [-.15, -.074]];
     hs.moveTo(hp[0][0], hp[0][1]); for(const q of hp.slice(1)) hs.lineTo(q[0], q[1]);
-    const hg = new T3.ExtrudeGeometry(hs, { depth: .026, bevelEnabled: false, curveSegments: 2 });
-    part(A, hg.toNonIndexed ? hg : hg, bf, Mf, new T3.Matrix4().set(0, 0, 1, -.013, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1).premultiply(new T3.Matrix4()), swUV(SW.holder));
+    const hg = new T3.ExtrudeGeometry(hs, { depth: .026, bevelEnabled: hi ? true : false, bevelThickness: .002, bevelSize: .0018, bevelSegments: 1, curveSegments: 2 });
+    part(A, hg, bf, Mf, new T3.Matrix4().set(0, 0, 1, -.013, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1), swUV(SW.holder));
     const ss = new T3.Shape(), steel = [];
     for(let k = 0; k <= 12; k++){ const z = lerp(-.158, .138, k/12); steel.push([z, -ANK + .0036*Math.pow((z + .01)/.148, 2) + .012*Math.pow(sst(-.13, -.158, z), 1.5) + .005*sst(.12, .138, z)]); }
     ss.moveTo(steel[0][0], steel[0][1]); for(const q of steel.slice(1)) ss.lineTo(q[0], q[1]);
@@ -551,26 +637,32 @@ function build(Mb, hi){
   }
 
   /* ---------------- the sticks: a left and a right, the unused one folded to nothing ---------------- */
+  const KT = SL - .165;
   for(let v = 0; v < 2; v++){
-    const bs = B.stk[v], Ms = Mb[bs], mzS = v ? -1 : 1, Mz = new T3.Matrix4().makeScale(1, 1, mzS);
-    const shaftR = (y0, y1, wx, wz, sw, n = 4.5) => tube(A, [{ y: y0, rx: wx, rz: wz, n }, { y: y1, rx: wx, rz: wz, n }], { seg: seg(12), M: Ms, th0: 0, uv: () => swUV(sw), w: () => [[bs, 1]] });
-    tube(A, [{ y: .012, rx: .0115, rz: .0058, n: 3 }, { y: .045, rx: .0135, rz: .0085, n: 4 }, { y: .1, rx: .0148, rz: .0104, n: 4.5 }], { seg: seg(12), M: Ms, th0: 0, uv: () => swUV(SW.shaft), w: () => [[bs, 1]] });
-    shaftR(.1, .62, .0148, .0104, SW.shaft); shaftR(.62, .7, .0149, .0105, SW.accent); shaftR(.7, SL - .165, .0148, .0104, SW.shaft);
-    tube(A, [{ y: SL - .165, rx: .0158, rz: .0114, n: 3.6 }, { y: SL - .03, rx: .0158, rz: .0114, n: 3.6 }, { y: SL - .016, rx: .0185, rz: .0145, n: 3 }, { y: SL - .004, rx: .018, rz: .014, n: 3 }, { y: SL, rx: .008, rz: .006, n: 2.4 }],
-      { seg: seg(12), M: Ms, th0: 0, uv: () => swUV(SW.knob), w: () => [[bs, 1]] });
-    /* the blade: a side profile, extruded, bent round its curve and set at the lie */
+    const bs = B.stk[v], Ms = Mb[bs], mzS = v ? -1 : 1;
+    const along = y => .09 + .82*clamp(y/KT);
+    const shaftR = (y0, y1, wx, wz) => tube(A, [{ y: y0, rx: wx, rz: wz, n: 4.5 }, { y: y1, rx: wx, rz: wz, n: 4.5 }], { seg: seg(12), M: Ms, th0: 0, uv: (fu, fa, k, r) => R_STICK(along(r.y), fu), w: () => [[bs, 1]] });
+    tube(A, [{ y: .012, rx: .0115, rz: .0058, n: 3 }, { y: .045, rx: .0135, rz: .0085, n: 4 }, { y: .1, rx: .0148, rz: .0104, n: 4.5 }], { seg: seg(12), M: Ms, th0: 0, uv: (fu, fa, k, r) => R_STICK(along(r.y), fu), w: () => [[bs, 1]] });
+    shaftR(.1, KT, .0148, .0104);
+    /* the knob: tape wound thick at the end, in ridges */
+    const knob = [{ y: KT, rx: .0152, rz: .0108, n: 3.6 }];
+    if(hi) for(let k = 1; k <= 8; k++){ const y = KT + k*.0165, rr = k % 2 ? .0006 : 0; knob.push({ y: y - .008, rx: .0158 + rr, rz: .0114 + rr, n: 3.6 }, { y, rx: .0161 + rr, rz: .0117 + rr, n: 3.6 }); }
+    knob.push({ y: SL - .03, rx: .0158, rz: .0114, n: 3.6 }, { y: SL - .016, rx: .0185, rz: .0145, n: 3 }, { y: SL - .004, rx: .018, rz: .014, n: 3 }, { y: SL, rx: .008, rz: .006, n: 2.4 });
+    tube(A, knob, { seg: seg(12), M: Ms, th0: 0, uv: (fu, fa, k, r) => R_STICK(.91 + .09*clamp((r.y - KT)/(SL - KT)), fu), w: () => [[bs, 1]] });
+    /* the blade: a side profile, extruded, bent round its curve and set at the lie; taped */
     const bs2 = new T3.Shape();
     const prof = [[-.012, .0], [BL - .03, .0], [BL - .01, .006], [BL, .02], [BL - .002, .045], [BL - .02, .066], [BL - .06, .072], [.12, .068], [.04, .062], [-.004, .058], [-.016, .05]];
     bs2.moveTo(prof[0][0], prof[0][1]); for(const q of prof.slice(1)) bs2.lineTo(q[0], q[1]); bs2.closePath();
     const bg = new T3.ExtrudeGeometry(bs2, { depth: .011, bevelEnabled: false, curveSegments: 3 });
-    const bp = bg.attributes.position;
+    const bp = bg.attributes.position, buv = bg.attributes.uv;
     for(let k = 0; k < bp.count; k++){
       const a = bp.getX(k), h = bp.getY(k), z = bp.getZ(k) - .0055, th = clamp(a/BL);
+      buv.setXY(k, clamp(a/BL), clamp(h/.072));
       const q = V().addScaledVector(BLADE_B, a).addScaledVector(BLADE_H, h); q.z = (z*(1 - .35*th) + curveAt(a))*mzS;
       bp.setXYZ(k, q.x, q.y, q.z);
     }
     bg.computeVertexNormals();
-    part(A, bg, bs, Ms, new T3.Matrix4(), swUV(SW.tape));
+    part(A, bg, bs, Ms, new T3.Matrix4(), (u, w) => R_STICK(.004 + .082*u, w));
   }
 
   /* ---------------- on the ice: the shadows under him, the snow of a stop (all see-through) ---------------- */
@@ -594,7 +686,7 @@ function sprayGeo(na, nb){
   const g = new T3.BufferGeometry();
   g.setAttribute('position', new T3.Float32BufferAttribute(p, 3)); g.setAttribute('uv', new T3.Float32BufferAttribute(uv, 2)); g.setIndex(ix);
   g.computeVertexNormals();
-  /* lit from above like the ice (and lit from within: see emTex) */
+  /* lit from above like the ice (and lit from within: see the emissive map) */
   const n = g.attributes.normal; for(let k = 0; k < n.count; k++) n.setXYZ(k, 0, 1, 0);
   return g;
 }
@@ -627,7 +719,8 @@ function finish(A){
   const g = new T3.BufferGeometry();
   g.setAttribute('position', new T3.Float32BufferAttribute(A.p, 3));
   g.setAttribute('normal', new T3.Float32BufferAttribute(A.n, 3));
-  g.setAttribute('uv', new T3.Float32BufferAttribute(A.uv, 2));
+  const uv = new T3.Float32BufferAttribute(A.uv, 2);
+  g.setAttribute('uv', uv); g.setAttribute('uv2', uv);
   g.setAttribute('skinIndex', new T3.Uint16BufferAttribute(A.si, 4));
   g.setAttribute('skinWeight', new T3.Float32BufferAttribute(A.sw, 4));
   /* one draw: the see-through parts last, so they lie over the man and the ice */
@@ -637,219 +730,20 @@ function finish(A){
   return g;
 }
 
-/* ===================================== THE ATLAS ===================================== */
-const SKINS = ['#f2c7a2', '#e2ab80', '#c98a5c', '#a2683f', '#74472a'];
-const HAIR = ['#2a1d14', '#4a3322', '#6b4a2b', '#b8904f', '#17110c', '#7a4a26'];
+/* ===================================== HIS LOOK ===================================== */
+const SKINS = ['#efc4a0', '#dfa97f', '#c68a5e', '#a0673f', '#72462a'];
+const HAIR = ['#2a1d14', '#4a3322', '#6b4a2b', '#b08a4c', '#17110c', '#7a4a26'];
 const EYES = ['#4a3020', '#3b5b7a', '#5a6a3a', '#2c2018', '#6b8aa6'];
-const shade = (hex, k) => { const n = parseInt(hex.slice(1), 16); let r = n >> 16, g = n >> 8 & 255, b = n & 255; const f = c => Math.round(clamp(k > 0 ? c + (255 - c)*k : c*(1 + k), 0, 255)); return 'rgb(' + f(r) + ',' + f(g) + ',' + f(b) + ')'; };
-const hexOf = c => /^#[0-9a-f]{6}$/i.test(c || '') ? c : '#111111';
 function lookOf(name, num){
   const h = seedOf(String(name) + '#' + num), h2 = seedOf(String(name));
-  return { skin: SKINS[h2 % SKINS.length], hair: HAIR[(h >>> 3) % HAIR.length], beard: (h >>> 6) % 4, eyes: EYES[(h >>> 9) % EYES.length],
+  return { skin: SKINS[h2 % SKINS.length], hair: HAIR[(h >>> 3) % HAIR.length], beard: (h >>> 6) % 4, eyes: EYES[(h >>> 9) % EYES.length], seed: h2 % 100000 + 1,
     tape: (h >>> 12) & 1 ? '#f2f2ee' : '#17181a', knob: (h >>> 13) % 3 ? '#f2f2ee' : '#1a1a1a', shaft: ['#16181c', '#1e2228', '#e8ebee', '#2c3036', '#16181c'][(h >>> 15) % 5],
     accent: ['#c8202a', '#e8ebee', '#d8b23a', '#3d9bff', '#9aa3ab'][(h >>> 18) % 5], holder: (h >>> 21) & 1 ? '#eef0f2' : '#1b1c1f', boot: ['#141517', '#1c1d20', '#101113'][(h >>> 23) % 3] };
 }
-const SW_RM = [[.32, 0], [.55, 0], [.62, 0], [.66, 0], [.82, 0], [.56, 0], [.32, .05], [.28, .55], [.42, 0], [.16, 1], [.34, 0], [.95, 0], [.95, 0], [.75, 0], [.86, 0], [.92, 0], [.92, 0], [.85, 0], [.36, 0], [.3, .8]];
-let RM_TEX = null;
-function rmTex(){
-  if(RM_TEX) return RM_TEX;
-  const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d');
-  const put = (x, y, w, h, r, m) => { g.fillStyle = 'rgb(0,' + Math.round(r*255) + ',' + Math.round(m*255) + ')'; g.fillRect(x/4, y/4, w/4, h/4); };
-  put(0, 0, 1024, 768, .84, 0); put(0, 768, 256, 256, .52, 0); put(256, 768, 128, 256, .92, 0); put(384, 768, 256, 256, .58, 0); put(896, 768, 128, 128, .26, 0);
-  put(128, 896, 128, 64, 1, 0); put(128, 960, 64, 64, .06, .15);
-  SW_RM.forEach((v, i) => { const [x, y] = swPos(i); put(x, y, 64, 64, v[0], v[1]); });
-  RM_TEX = new T3.CanvasTexture(c); return RM_TEX;
-}
-function noise(g, x0, y0, w, h, n, a, dark = true){
-  g.save(); g.globalAlpha = a;
-  for(let k = 0; k < n; k++){ g.fillStyle = (Math.random() < .5) === dark ? '#000' : '#fff'; g.fillRect(x0 + Math.random()*w, y0 + Math.random()*h, 1, 1); }
-  g.restore();
-}
-function paintAtlas(g, abbr, name, num, look){
-  const k = C.kitOf(abbr), crest = k.logo || abbr;
-  /* the sweater, the sleeves: the old painters, unchanged */
-  g.save(); g.beginPath(); g.rect(0, 0, 1024, 512); g.clip(); C.paintTorso(g, k, crest, name, num); g.restore();
-  clothTorso(g);
-  g.save(); g.beginPath(); g.rect(0, 512, 512, 256); g.clip(); g.translate(0, 512); g.scale(2, 2); C.paintUpper(g, k, num); g.restore();
-  g.save(); g.beginPath(); g.rect(512, 512, 512, 256); g.clip(); g.translate(512, 512); g.scale(2, 2); C.paintFore(g, k); g.restore();
-  clothArms(g);
-  paintLeg(g, k); paintWaist(g, k);
-  g.save(); g.beginPath(); g.rect(256, 768, 128, 256); g.clip(); g.translate(256, 768); g.scale(2, 2); C.paintSocks(g, k); g.restore();
-  noise(g, 256, 768, 128, 256, 2200, .06); sockShade(g);
-  paintFX(g);
-  paintFace(g, look); paintHelmet(g, k, num);
-  const glv = k.glv || [k.helm || k.b, k.b], helm = k.helm || k.b;
-  const sw = [helm, '#121314', glv[0], glv[1], lum(glv[0]) > .6 ? '#c9b89a' : '#3a3734', look.skin, look.boot, '#9aa3ab', look.holder, '#d3dae0', look.shaft, look.knob, look.tape, '#141414', (k.col || [k.b])[0], '#c8cbcf', '#e3e3e0', look.hair, look.accent, '#c0c6cc'];
-  sw.forEach((c, i) => { const [x, y] = swPos(i); g.fillStyle = hexOf(c); g.fillRect(x, y, 64, 64); });
-  /* tape: a little texture on the knob and blade swatches */
-  for(const i of [SW.knob, SW.tape]){ const [x, y] = swPos(i); noise(g, x, y, 64, 64, 300, .08); }
-}
-/* the see-through cells: everything else in the atlas is opaque */
-function paintFX(g){
-  g.clearRect(128, 896, 128, 128);
-  /* the shadow on the ice: soft, darkest in the middle */
-  g.fillStyle = 'rgba(0,0,0,.004)'; g.fillRect(128, 896, 64, 64);
-  let gr = g.createRadialGradient(160, 928, 2, 160, 928, 29); gr.addColorStop(0, 'rgba(0,0,0,.52)'); gr.addColorStop(.45, 'rgba(0,0,0,.34)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
-  g.fillStyle = gr; g.fillRect(130, 898, 60, 60);
-  /* snow: white grains, thick at the blade (bottom of the cell), thinning out and to the sides */
-  g.fillStyle = 'rgba(255,255,255,.004)'; g.fillRect(192, 896, 64, 64);
-  let sd = 7;
-  const rnd = () => (sd = (sd*16807) % 2147483647)/2147483647;
-  /* a mist first, thickest at the blade */
-  g.save(); g.beginPath(); g.rect(193, 897, 62, 62); g.clip();
-  gr = g.createRadialGradient(224, 962, 2, 224, 962, 58); gr.addColorStop(0, 'rgba(255,255,255,.8)'); gr.addColorStop(.5, 'rgba(255,255,255,.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = gr; g.fillRect(193, 897, 62, 62);
-  for(let k = 0; k < 1400; k++){
-    const u = rnd(), v = Math.pow(rnd(), 1.4), side = 1 - Math.pow(Math.abs(u - .5)*2, 2), a = (1 - v)*side;
-    if(rnd() > a) continue;
-    g.fillStyle = 'rgba(255,255,255,' + (.3 + .6*a*rnd()).toFixed(2) + ')';
-    const x = 194 + u*60, y = 958 - v*60, r = .45 + .9*rnd()*(1 - .5*v);
-    g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
-  }
-  g.restore();
-  /* the visor: clear with a faint blue-grey, a smoked band along the top, a brighter lower edge */
-  gr = g.createLinearGradient(0, 1022, 0, 962);
-  gr.addColorStop(0, 'rgba(190,205,220,.34)'); gr.addColorStop(.12, 'rgba(215,230,245,.16)'); gr.addColorStop(.72, 'rgba(215,230,245,.14)'); gr.addColorStop(.86, 'rgba(60,70,85,.42)'); gr.addColorStop(1, 'rgba(40,46,56,.5)');
-  g.fillStyle = gr; g.fillRect(128, 960, 64, 64);
-}
-const lum = hex => { const n = parseInt(hexOf(hex).slice(1), 16); return (.299*(n >> 16) + .587*(n >> 8 & 255) + .114*(n & 255))/255; };
-/* soft shading baked into the cloth: under the arms, the hem, the folds at the waist */
-function clothTorso(g){
-  g.save();
-  for(const u of [0, .5, 1]){
-    const gr = g.createLinearGradient(u*1024 - 90, 0, u*1024 + 90, 0); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(.5, 'rgba(0,0,0,.16)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = gr; g.fillRect(u*1024 - 90, 0, 180, 300);
-  }
-  const hem = g.createLinearGradient(0, 512, 0, 470); hem.addColorStop(0, 'rgba(0,0,0,.28)'); hem.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = hem; g.fillRect(0, 470, 1024, 42);
-  g.globalAlpha = .07; g.strokeStyle = '#000'; g.lineWidth = 7;
-  for(let i = 0; i < 9; i++){ const x = 60 + i*112 + (i % 2)*20, y = 300 + (i % 3)*26; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + 40, y + 18, x + 82, y + 6); g.stroke(); }
-  g.globalAlpha = .05; g.strokeStyle = '#fff'; g.lineWidth = 3;
-  for(let i = 0; i < 9; i++){ const x = 64 + i*112 + (i % 2)*20, y = 292 + (i % 3)*26; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + 40, y + 18, x + 82, y + 6); g.stroke(); }
-  g.restore();
-  noise(g, 0, 0, 1024, 512, 9000, .05);
-}
-function clothArms(g){
-  g.save();
-  /* the crook of the elbow, inside the arm (u = .75) */
-  for(const [x0, y0, yy] of [[0, 512, 22], [512, 512, 234]]){
-    const gr = g.createRadialGradient(x0 + 384, y0 + yy, 4, x0 + 384, y0 + yy, 90); gr.addColorStop(0, 'rgba(0,0,0,.2)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = gr; g.fillRect(x0, y0, 512, 256);
-  }
-  g.restore();
-  noise(g, 0, 512, 1024, 256, 4000, .05);
-}
-function sockShade(g){
-  const gr = g.createLinearGradient(256, 0, 384, 0); gr.addColorStop(0, 'rgba(0,0,0,.12)'); gr.addColorStop(.25, 'rgba(0,0,0,0)'); gr.addColorStop(.75, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,.12)');
-  g.fillStyle = gr; g.fillRect(256, 768, 128, 256);
-}
-function paintLeg(g, k){
-  const [c, s] = k.pants || ['#111111', null], x0 = 0, y0 = 768, w = 128, h = 256;
-  g.fillStyle = hexOf(c); g.fillRect(x0, y0, w, h);
-  /* the padded panels of a pair of breezers: quilting and seams */
-  g.save(); g.globalAlpha = .18; g.fillStyle = '#000';
-  for(const v of [.38, .66]) g.fillRect(x0, y0 + (1 - v)*h - 2, w, 3);
-  for(const u of [.0, .5, 1]) g.fillRect(x0 + u*w - 1.5, y0, 3, h);
-  g.globalAlpha = .1; g.fillStyle = '#fff'; for(const v of [.38, .66]) g.fillRect(x0, y0 + (1 - v)*h + 1, w, 2);
-  g.restore();
-  if(s){ g.fillStyle = hexOf(s); g.fillRect(x0 + .25*w - 5, y0, 10, h*.94); g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(x0 + .25*w - 6, y0, 1.5, h*.94); g.fillRect(x0 + .25*w + 4.5, y0, 1.5, h*.94); }
-  const hem = g.createLinearGradient(0, y0 + h, 0, y0 + h - 30); hem.addColorStop(0, 'rgba(0,0,0,.45)'); hem.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = hem; g.fillRect(x0, y0 + h - 30, w, 30);
-  noise(g, x0, y0, w, h, 1200, .05);
-}
-function paintWaist(g, k){
-  const [c, s] = k.pants || ['#111111', null], x0 = 128, y0 = 768, w = 128, h = 128;
-  g.fillStyle = hexOf(c); g.fillRect(x0, y0, w, h);
-  if(s) for(const u of [0, .5, 1]){ g.fillStyle = hexOf(s); g.fillRect(x0 + u*w - 5, y0 + h*.05, 10, h*.95); }
-  g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(x0, y0, w, 13);
-  g.fillStyle = 'rgba(0,0,0,.15)'; g.fillRect(x0 + .75*w - 1.5, y0, 3, h);
-  noise(g, x0, y0, w, h, 1200, .05);
-}
-/* the face: front half of the head, his right on the left of the canvas, chin at the bottom */
-function paintFace(g, L){
-  const x0 = 384, y0 = 768, W = 256, H = 256, X = u => x0 + u*W, Y = v => y0 + (1 - v)*H;
-  g.save(); g.beginPath(); g.rect(x0, y0, W, H); g.clip();
-  g.fillStyle = L.skin; g.fillRect(x0, y0, W, H);
-  /* modelling: darker towards the sides and under the jaw, warm on the cheeks */
-  let gr = g.createLinearGradient(x0, 0, x0 + W, 0);
-  gr.addColorStop(0, 'rgba(60,30,20,.35)'); gr.addColorStop(.25, 'rgba(60,30,20,.05)'); gr.addColorStop(.5, 'rgba(0,0,0,0)'); gr.addColorStop(.75, 'rgba(60,30,20,.05)'); gr.addColorStop(1, 'rgba(60,30,20,.35)');
-  g.fillStyle = gr; g.fillRect(x0, y0, W, H);
-  gr = g.createLinearGradient(0, Y(0), 0, Y(.2)); gr.addColorStop(0, 'rgba(40,20,10,.35)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x0, Y(.2), W, H*.2);
-  for(const u of [.34, .66]){ gr = g.createRadialGradient(X(u), Y(.3), 2, X(u), Y(.3), 26); gr.addColorStop(0, 'rgba(200,80,70,.16)'); gr.addColorStop(1, 'rgba(200,80,70,0)'); g.fillStyle = gr; g.fillRect(X(u) - 30, Y(.3) - 30, 60, 60); }
-  /* beard or stubble */
-  if(L.beard){
-    g.save(); g.globalAlpha = L.beard === 3 ? .85 : L.beard === 2 ? .55 : .28; g.fillStyle = L.hair;
-    g.beginPath(); g.moveTo(X(.12), Y(.33)); g.quadraticCurveTo(X(.2), Y(.02), X(.5), Y(-.02)); g.quadraticCurveTo(X(.8), Y(.02), X(.88), Y(.33));
-    g.lineTo(X(.8), Y(.3)); g.quadraticCurveTo(X(.66), Y(.13), X(.5), Y(.11)); g.quadraticCurveTo(X(.34), Y(.13), X(.2), Y(.3)); g.closePath(); g.fill();
-    g.beginPath(); g.ellipse(X(.5), Y(.235), 22, 6, 0, 0, TAU); g.fill();
-    g.restore();
-    noise(g, X(.12), Y(.33), W*.76, H*.33, 900, .25);
-  }
-  /* nose: a shadow down one side, nostrils */
-  g.fillStyle = 'rgba(70,35,20,.22)'; g.beginPath(); g.moveTo(X(.47), Y(.5)); g.quadraticCurveTo(X(.455), Y(.36), X(.465), Y(.3)); g.lineTo(X(.49), Y(.31)); g.quadraticCurveTo(X(.48), Y(.38), X(.49), Y(.5)); g.fill();
-  g.fillStyle = 'rgba(50,20,15,.55)'; for(const u of [.475, .525]){ g.beginPath(); g.ellipse(X(u), Y(.305), 4, 2.2, 0, 0, TAU); g.fill(); }
-  /* mouth */
-  g.strokeStyle = 'rgba(90,35,30,.75)'; g.lineWidth = 2.6; g.beginPath(); g.moveTo(X(.43), Y(.2)); g.quadraticCurveTo(X(.5), Y(.19), X(.57), Y(.2)); g.stroke();
-  g.fillStyle = 'rgba(150,70,60,.35)'; g.beginPath(); g.ellipse(X(.5), Y(.18), 12, 3.5, 0, 0, TAU); g.fill();
-  /* eyes, set back under the brow */
-  for(const u of [.37, .63]){
-    gr = g.createRadialGradient(X(u), Y(.44), 4, X(u), Y(.44), 22); gr.addColorStop(0, 'rgba(60,30,20,.3)'); gr.addColorStop(1, 'rgba(60,30,20,0)'); g.fillStyle = gr; g.fillRect(X(u) - 24, Y(.44) - 24, 48, 48);
-    g.fillStyle = '#e6ddd2'; g.beginPath(); g.ellipse(X(u), Y(.43), 8.5, 3.6, 0, 0, TAU); g.fill();
-    g.fillStyle = L.eyes; g.beginPath(); g.arc(X(u) + (u < .5 ? 1 : -1), Y(.43), 3.3, 0, TAU); g.fill();
-    g.fillStyle = '#0b0a09'; g.beginPath(); g.arc(X(u) + (u < .5 ? 1 : -1), Y(.43), 1.5, 0, TAU); g.fill();
-    g.fillStyle = 'rgba(255,255,255,.7)'; g.fillRect(X(u) + 1, Y(.43) - 2, 1.5, 1.5);
-    g.strokeStyle = 'rgba(30,15,10,.8)'; g.lineWidth = 1.8; g.beginPath(); g.ellipse(X(u), Y(.43) + 1, 9.5, 4.6, 0, PI*1.05, PI*1.95); g.stroke();
-    /* the brow */
-    g.strokeStyle = shade(L.hair, -.1); g.lineWidth = 3.4; g.lineCap = 'round'; g.beginPath(); g.moveTo(X(u) - 11*(u < .5 ? 1 : -1), Y(.495)); g.quadraticCurveTo(X(u), Y(.525), X(u) + 12*(u < .5 ? 1 : -1), Y(.505)); g.stroke();
-  }
-  /* hair at the temples and above the brow, under the helmet's edge */
-  g.fillStyle = L.hair; g.fillRect(x0, Y(1), W, H*.32); g.fillRect(x0, Y(.75), W*.07, H*.4); g.fillRect(x0 + W*.93, Y(.75), W*.07, H*.4);
-  g.restore();
-  noise(g, x0, y0, W, H, 1600, .05);
-}
-function paintHelmet(g, k, num){
-  const x0 = 896, y0 = 768, W = 128, H = 128, c = hexOf(k.helm || k.b);
-  g.fillStyle = c; g.fillRect(x0, y0, W, H);
-  const gr = g.createLinearGradient(0, y0 + H, 0, y0); gr.addColorStop(0, 'rgba(0,0,0,.18)'); gr.addColorStop(.6, 'rgba(255,255,255,0)'); gr.addColorStop(1, 'rgba(255,255,255,.12)'); g.fillStyle = gr; g.fillRect(x0, y0, W, H);
-  /* vents: slots across the top and down the back */
-  g.fillStyle = 'rgba(0,0,0,.72)';
-  const slot = (u, v, w, h) => { const x = x0 + u*W, y = y0 + (1 - v)*H; g.beginPath(); g.ellipse(x, y, w, h, 0, 0, TAU); g.fill(); };
-  for(const u of [.2, .3]) slot(u, .78, 2.2, 7);
-  for(const u of [.08, .42]) slot(u, .6, 2, 6);
-  for(const u of [.58, .92]) slot(u, .6, 2, 6);
-  for(const u of [.7, .8]) slot(u, .72, 2.2, 7);
-  for(const u of [.75]) slot(u, .9, 5, 2);
-  /* a seam over the crown, the edge rubber */
-  g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(x0 + .25*W - .75, y0, 1.5, H*.6); g.fillRect(x0 + .75*W - .75, y0, 1.5, H*.6);
-  g.fillStyle = '#111'; g.fillRect(x0, y0 + H - 5, W, 5);
-  /* the number on the back */
-  if(num !== '' && num != null){
-    const n = k.n || ['#ffffff']; g.save(); g.translate(x0 + .75*W, y0 + .7*H); g.scale(.55, 1); g.font = '900 15px "Big Shoulders Display", Impact, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillStyle = lum(c) > .6 ? '#111' : (lum(n[0]) > .35 ? n[0] : '#ffffff'); g.fillText(String(num), 0, 0); g.restore();
-  }
-}
-
-/* materials: one per man, cached */
-const matCache = {};
-/* the snow glows a little, so it is white whichever side of it the camera sees */
-let EM_TEX = null;
-function emTex(){
-  if(EM_TEX) return EM_TEX;
-  const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d');
-  g.fillStyle = '#000'; g.fillRect(0, 0, 256, 256); g.fillStyle = '#8a9096'; g.fillRect(48, 224, 16, 16);
-  EM_TEX = new T3.CanvasTexture(c); return EM_TEX;
-}
-/* ONE material and one draw call per man: blended, so the see-through parts at the end of the index
-   (the visor, his shadows on the ice, the snow of a stop) are see-through, while everything else in the
-   atlas is opaque and draws as before. His own shadow caster leaves out everything see-through. */
-function manMat(abbr, name, num){
-  const key = abbr + '|' + name + '|' + num;
-  if(matCache[key]) return matCache[key];
-  const look = lookOf(name, num);
-  const map = C.paintTex(ATL, ATL, g => paintAtlas(g, abbr, name, num, look));
-  const m = new T3.MeshStandardMaterial({ map, roughnessMap: rmTex(), metalnessMap: rmTex(), roughness: 1, metalness: 1, skinning: true, side: T3.DoubleSide,
-    transparent: true, depthWrite: true, alphaTest: .02, emissiveMap: emTex(), emissive: 0xffffff });
-  m.depth = new T3.MeshDepthMaterial({ depthPacking: T3.RGBADepthPacking, map, alphaTest: .5, skinning: true });
-  return matCache[key] = m;
-}
+/* ONE material and one draw call per man (app/faceoff/skatertex.js): blended, so the see-through parts at
+   the end of the index (the visor, his shadows on the ice, the snow of a stop) are see-through, while
+   everything else is opaque and draws as before. His own shadow caster leaves out everything see-through. */
+const manMat = (abbr, name, num) => TX.manMat(abbr, name, num, lookOf(name, num));
 
 /* ===================================== A MAN =====================================
    S.pose(Pq) with Pq written for a left shot (see basePose). Returns { blade, Hh, hd }. */
@@ -1466,7 +1360,7 @@ function labCam(cam, key, dt){
 return {
   make, matchPose, shotPose, showPose, SL,
   labSet, labStep, labCam, lab, MOTIONS: Object.keys(MOTIONS),
-  geo: () => GEO, lookOf
+  geo: () => GEO, lookOf, texMemory: () => TX.memory()
 };
 };
 })();

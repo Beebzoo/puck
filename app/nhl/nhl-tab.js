@@ -6,6 +6,7 @@
      #nhl-clubs                  every club by division
      #nhl-team-<ABBR>            team page: points race, goals for/against, form, leaders, roster
      #nhl-player-<id>            player page: bio, season, game log chart, career chart, awards
+     #nhl-game-<gameId>          one game, head to head (app/nhl/game.js): form, win estimate, stats, series
    Data: PUCK.nhl.cached() (app/nhl.js) through the relay's allow-list; charts: app/nhl/charts.js.
    Your favourite team ((await PUCK.store.me()).team) is drawn in its own colours everywhere;
    the Pool teams (MTL, EDM) in ember. No live stats go to the ticker or the quiz. */
@@ -239,9 +240,10 @@ function gameTile(x){
   const sc = t => typeof t.score === "number" ? t.score : "";
   const won = (t, o) => s.done && t.score > o.score ? " w" : "";
   const side = (t, o) => { const m = hl(t.abbrev); return '<span class="tm' + m.cls + won(t, o) + '"' + m.st + ">" + logo(t.abbrev, "nx-lgs") + "<b>" + t.abbrev + "</b><em>" + esc(t.record || "") + "</em><strong>" + sc(t) + "</strong></span>"; };
-  const tag = pool ? '<span class="pool">POOL ►</span>' : "";
-  return (pool ? '<a class="nx-game pool' : '<div class="nx-game') + (s.live ? " live" : "") + '"' + (pool ? ' href="#pool"' : "") + ">" +
-    '<span class="st">' + (s.live ? '<i class="dot"></i>' : "") + esc(s.txt) + tag + "</span>" + side(a, h) + side(h, a) + (pool ? "</a>" : "</div>");
+  const tag = pool ? '<span class="pool">POOL</span>' : "";
+  /* every card opens the game's head-to-head page; a Pool game's page has the way into the Pool */
+  return '<a class="nx-game' + (pool ? " pool" : "") + (s.live ? " live" : "") + '" href="#nhl-game-' + x.id + '" aria-label="' + esc(a.abbrev + " at " + h.abbrev + ", head to head") + '">' +
+    '<span class="st">' + (s.live ? '<i class="dot"></i>' : "") + esc(s.txt) + tag + "</span>" + side(a, h) + side(h, a) + "</a>";
 }
 async function tonight(page, alive){
   const box = () => $("#ov-tonight", page);
@@ -250,7 +252,7 @@ async function tonight(page, alive){
     const lv = g.filter(x => x.gameState === "LIVE" || x.gameState === "CRIT").length;
     const sub = '<span class="nx-sub">' + day(d) + " · " + g.length + " GAME" + (g.length === 1 ? "" : "S") + (lv ? ' · <b class="lv">' + lv + " LIVE</b>" : "") + "</span>";
     box().innerHTML = lbl(lv ? "Live now" : "Tonight", sub) + (g.length ? '<div class="nx-games">' + g.map(gameTile).join("") + "</div>" : '<p class="nx-none">No NHL games today.</p>') +
-      (g.length ? '<p class="nx-fine">Times in your time zone. Tap a Pool game to pick it.</p>' : "");
+      (g.length ? '<p class="nx-fine">Times in your time zone. Tap a game for the head to head.</p>' : "");
     return g;
   };
   try {
@@ -499,7 +501,7 @@ async function teamPage(page, alive, abbr){
     html += '<section class="nx-panel">' + lbl("Form", '<span class="nx-sub">LAST ' + Math.min(10, done.length) + "</span>") + '<div class="nx-form">' + done.slice(-10).reverse().map(g =>
       '<a class="fm ' + g.res.toLowerCase() + '" href="#nhl-team-' + g.opp + '"><em>' + (g.res === "OTL" ? g.end : g.res) + "</em>" + logo(g.opp, "nx-lgs") + "<b>" + g.gf + "–" + g.ga + (g.end !== "REG" ? "<sup>" + g.end + "</sup>" : "") + "</b><small>" + vs(g) + " " + g.opp + " · " + dm(g.start) + "</small></a>").join("") + "</div>" +
       (res.live || res.next.length ? '<h3 class="nx-ch">' + (res.live ? "Live now" : "Next up") + '</h3><div class="nx-next">' + (res.live ? [res.live] : []).concat(res.next.slice(0, res.live ? 2 : 3)).map(g =>
-        '<a href="#nhl-team-' + g.opp + '"' + (g === res.live ? ' class="live"' : "") + "><small>" + (g === res.live ? '<i class="dot"></i>LIVE · ' + g.gf + "–" + g.ga : day(g.start) + " · " + time(g.start)) + "</small>" + '<span>' + vs(g) + "</span>" + logo(g.opp, "nx-lgs") + "<b>" + esc(P.team(g.opp).name) + "</b></a>").join("") + "</div>" : "") + "</section>";
+        '<a href="#nhl-game-' + g.id + '"' + (g === res.live ? ' class="live"' : "") + "><small>" + (g === res.live ? '<i class="dot"></i>LIVE · ' + g.gf + "–" + g.ga : day(g.start) + " · " + time(g.start)) + "</small>" + '<span>' + vs(g) + "</span>" + logo(g.opp, "nx-lgs") + "<b>" + esc(P.team(g.opp).name) + "</b></a>").join("") + "</div>" : "") + "</section>";
   }
   /* the team's own leaders and its roster with this season's numbers */
   if(cs.status === "fulfilled"){
@@ -648,7 +650,7 @@ async function render(app, arg){
   const my = ++gen; stamps = [];
   const parts = String(arg || "").split("-"), kind = parts[0] || "", rest = parts.slice(1).join("-");
   const section = kind === "standings" ? "standings" : kind === "leaders" ? "leaders" : kind === "clubs" ? "clubs" : kind === "" ? "overview" : null;
-  const page = frame(app, section, kind === "team" || kind === "player");
+  const page = frame(app, section, kind === "team" || kind === "player" || kind === "game");
   const alive = () => my === gen && document.body.contains(page);
   FAV = await favTeam();
   if(!alive()) return;
@@ -657,7 +659,11 @@ async function render(app, arg){
   if(kind === "clubs") return clubsPage(page, alive);
   if(kind === "team") return teamPage(page, alive, rest);
   if(kind === "player") return playerPage(page, alive, rest);
+  if(kind === "game" && P.nhlGame) return P.nhlGame.page(page, alive, rest, KIT);
   return overview(page, alive);
 }
+/* the helpers app/nhl/game.js (the game page) shares with this file */
+const KIT = { esc, $, $$, onLeave, POOL, day, dm, time, ymd, ord, p3, f2, f1, pc1, sgn, nm, logo, logoSrc, head, tc, tvars, hl, fav: () => FAV,
+  TTL, PATHS, load, standings, results, sk, lbl, fail, stamp, legend };
 P.nhlTab = { render };
 })();

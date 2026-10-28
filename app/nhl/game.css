@@ -1,0 +1,185 @@
+/* The NHL tab's game page (app/nhl/game.js), #nhl-game-<id>. Same rules as nhl-tab.css: sizes in cqw,
+   Exo 2 Black Italic for names and numbers, Michroma for small labels. The page sets --ca / --ch (the away
+   and home accents for bars) and --a1 / --h1 (their main colours). .fav = your team, .ours = MTL / EDM. */
+
+/* the tonight cards are links now */
+.nx-game{color:inherit;transition:filter .15s,transform .15s}
+.nx-game:hover{filter:brightness(1.15)}
+.nx-game:active{transform:scale(.98)}
+.nx-game:focus-visible{outline:2px solid #fff;outline-offset:2px}
+
+/* ---------- the faceoff ---------- */
+.gp-hero{position:relative;display:flex;flex-direction:column;gap:2cqw;padding:3.4cqw 3cqw 3cqw;border:2px solid transparent;border-radius:2.8cqw;overflow:hidden;color:#fff;
+  background:repeating-linear-gradient(115deg,rgba(255,255,255,.05) 0 2.4cqw,transparent 2.4cqw 6cqw) padding-box,
+    linear-gradient(105deg,var(--a1) 0%,color-mix(in srgb,var(--a1) 40%,#030a18) 38%,#030a18 49.6%,#030a18 50.4%,color-mix(in srgb,var(--h1) 40%,#030a18) 62%,var(--h1) 100%) padding-box,
+    var(--chromeframe) border-box;box-shadow:0 2.4cqw 6cqw rgba(0,0,0,.45)}
+.gp-hero.live{box-shadow:0 0 0 .5cqw rgba(255,90,90,.35),0 2.4cqw 6cqw rgba(0,0,0,.45)}
+.gp-hero .wm{position:absolute;top:50%;width:52cqw;height:52cqw;opacity:.1;pointer-events:none;transform:translateY(-50%)}
+.gp-hero .wm img{width:100%;height:100%;object-fit:contain}
+.gp-hero .wm.a{left:-22cqw}.gp-hero .wm.h{right:-22cqw}
+.gp-top{position:relative;margin:0;text-align:center;font:1.8cqw/1.3 var(--wide);letter-spacing:.14em;color:rgba(255,255,255,.82)}
+.gp-fo{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 25cqw minmax(0,1fr);align-items:start;gap:1.4cqw}
+.gp-tm{display:flex;flex-direction:column;align-items:center;gap:1cqw;text-align:center;min-width:0;color:#fff}
+.gp-lg{width:25cqw;height:25cqw;object-fit:contain;filter:drop-shadow(0 1.4cqw 2cqw rgba(0,0,0,.55));margin-bottom:.6cqw}
+.gp-tm.a .gp-lg{transform:rotate(-5deg) translateX(1cqw)}
+.gp-tm.h .gp-lg{transform:rotate(5deg) translateX(-1cqw)}
+.gp-tm b{font:900 italic 8cqw/.9 var(--game);text-shadow:0 .6cqw 0 rgba(0,0,0,.35)}
+.gp-tm .nm{font:800 italic 3.1cqw/1.1 var(--game);text-transform:uppercase;color:rgba(255,255,255,.85);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gp-tm .rec{font:700 2.9cqw/1.1 var(--game);color:#fff;font-variant-numeric:tabular-nums;white-space:nowrap}
+.gp-tm .pl{font:1.55cqw/1.2 var(--wide);letter-spacing:.1em;color:var(--gold);white-space:nowrap}
+.gp-tm .tag{font:900 italic 2.2cqw/1 var(--game);letter-spacing:.04em;padding:.8cqw 1.6cqw;border-radius:.8cqw;transform:skewX(-10deg);margin-top:.6cqw}
+.gp-tm .tag.ours{color:#1a0d00;background:var(--embergrad)}
+.gp-tm .tag.fav{color:#06101f;background:var(--ta,#ffd36a)}
+.gp-tm.ours b{color:var(--gold)}
+.gp-tm.fav b{color:var(--ta)}
+.gp-mid{display:flex;flex-direction:column;align-items:center;gap:1.2cqw;padding-top:6cqw;text-align:center}
+.gp-mid .vs{font:900 italic 9cqw/1 var(--game);background:linear-gradient(#fff,#dfe8f2 45%,#8fa0b5 52%,#c9d6e4 80%,#f2f7fc);-webkit-background-clip:text;background-clip:text;color:transparent;padding:0 1cqw}
+.gp-mid .tme{font:900 italic 6.4cqw/1 var(--game);color:var(--gold);font-variant-numeric:tabular-nums}
+.gp-mid small{font:1.6cqw/1.3 var(--wide);letter-spacing:.1em;color:rgba(255,255,255,.8);white-space:nowrap}
+.gp-mid small.pp{color:#ff8a8a}
+.gp-mid .sc{display:flex;align-items:center;gap:1.4cqw;font:900 italic 11cqw/1 var(--game);font-variant-numeric:tabular-nums}
+.gp-mid .sc b{color:rgba(255,255,255,.72)}.gp-mid .sc b.w{color:#fff;text-shadow:0 0 3cqw rgba(255,211,106,.45)}
+.gp-mid .sc i{font-size:6cqw;color:rgba(255,255,255,.5)}
+.gp-mid small.lv{display:flex;align-items:center;gap:1cqw;color:#ff8a8a;font-size:1.9cqw}
+.gp-mid small.fn{color:var(--gold);font-size:1.9cqw}
+.gp-mid small.sog{color:var(--mist)}
+.gp-mid .dot,.gp-game .dot{width:1.6cqw;height:1.6cqw;border-radius:50%;background:#ff4d4d;box-shadow:0 0 2cqw #ff4d4d;animation:gpPulse 1.2s ease-in-out infinite}
+@keyframes gpPulse{50%{opacity:.35}}
+.gp-ah{position:relative;display:flex;justify-content:space-between;align-items:center;margin:0;font:1.5cqw/1 var(--wide);letter-spacing:.14em;color:rgba(255,255,255,.6)}
+.gp-ah span:nth-child(2){font-size:1.4cqw;letter-spacing:.08em}
+
+/* ---------- into the Pool ---------- */
+.gp-pool{display:flex;align-items:center;justify-content:space-between;gap:2cqw;padding:2.4cqw 3.6cqw;transform:skewX(-10deg);background:var(--embergrad);color:#1a0d00;box-shadow:0 0 4cqw rgba(255,170,50,.35);margin:0 1cqw}
+.gp-pool > *{transform:skewX(10deg)}
+.gp-pool span{display:grid;gap:.6cqw}
+.gp-pool small{font:1.7cqw/1 var(--wide);letter-spacing:.14em}
+.gp-pool b{font:900 italic 4.6cqw/1 var(--game);text-transform:uppercase}
+.gp-pool em{font:900 normal 4cqw/1 var(--game)}
+.gp-pool:hover{filter:brightness(1.08)}
+
+/* ---------- away | home key, mirrored stat rows ---------- */
+.gp-key{display:flex;justify-content:space-between;align-items:center}
+.gp-key span{display:flex;align-items:center;gap:1.2cqw}
+.gp-key b{font:900 italic 3.6cqw/1 var(--game)}
+.gp-key .a b{color:var(--ca)}.gp-key .h b{color:var(--ch)}
+.gp-sts{display:grid;gap:2.2cqw}
+.gp-st{display:grid;grid-template-columns:15cqw minmax(0,1fr) minmax(0,1fr) 15cqw;grid-template-rows:auto auto;align-items:center;column-gap:.6cqw;row-gap:.8cqw}
+.gp-st > small{grid-column:1 / -1;text-align:center;font:1.65cqw/1 var(--wide);letter-spacing:.1em;color:var(--mist2);text-transform:uppercase}
+.gp-st .v{display:flex;flex-direction:column;gap:.4cqw;font:900 italic 4.2cqw/1 var(--game);color:var(--mist);font-variant-numeric:tabular-nums;white-space:nowrap}
+.gp-st .v.a{align-items:flex-start}.gp-st .v.h{align-items:flex-end}
+.gp-st .v.on{color:#fff}
+.gp-st .v em{font:1.4cqw/1 var(--wide);font-style:normal;letter-spacing:.08em;color:var(--gold);opacity:.85}
+.gp-st .bar{height:2.4cqw;display:flex;background:rgba(143,180,221,.1);overflow:hidden}
+.gp-st .bar.a{justify-content:flex-end;border-radius:99px 0 0 99px}
+.gp-st .bar.h{border-radius:0 99px 99px 0}
+.gp-st .bar i{display:block;height:100%;opacity:.38}
+.gp-st .bar.a i{background:linear-gradient(270deg,var(--ca),color-mix(in srgb,var(--ca) 60%,#030a18))}
+.gp-st .bar.h i{background:linear-gradient(90deg,var(--ch),color-mix(in srgb,var(--ch) 60%,#030a18))}
+.gp-st .bar.on i{opacity:1}
+
+/* ---------- the game ---------- */
+.nx-sub.lvt{color:#ff8a8a}
+.gp-ls td small.sh{display:block;font:600 1.9cqw/1 var(--game);color:#6f8fb6;margin-top:.5cqw}
+.gp-ls td,.gp-ls th{text-align:center}
+.gp-goals{display:grid;gap:1.2cqw}
+.gp-ph{margin:1.4cqw 0 .2cqw;font:1.7cqw/1 var(--wide);letter-spacing:.14em;color:var(--gold)}
+.gp-goal{display:grid;grid-template-columns:9cqw minmax(0,1fr) auto;align-items:center;gap:2cqw;padding:1.2cqw 3cqw 1.2cqw 2cqw;transform:skewX(-10deg);background:var(--barbg);border-left:.7cqw solid #3d6fae}
+.gp-goal > *{transform:skewX(10deg)}
+.gp-goal.a{border-left-color:var(--ca)}.gp-goal.h{border-left-color:var(--ch)}
+.gp-goal.ours{background:linear-gradient(90deg,rgba(240,138,23,.24),rgba(10,30,60,.32))}
+.gp-goal.fav{background:var(--tbg,var(--barbg))}
+.gp-goal .who{display:grid;gap:.9cqw;min-width:0}
+.gp-goal .who b{font:900 italic 3.6cqw/1 var(--game);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gp-goal .who b i{font:700 normal 2.4cqw/1 var(--game);color:var(--mist2)}
+.gp-goal .who small{display:flex;align-items:center;gap:.8cqw;font:600 2.3cqw/1.2 var(--game);color:var(--mist2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gp-goal .sc{display:flex;align-items:center;gap:1.4cqw}
+.gp-goal .sc em{font:1.5cqw/1 var(--wide);font-style:normal;letter-spacing:.08em;color:#1a0d00;background:var(--gold);padding:.7cqw 1cqw;border-radius:.6cqw}
+.gp-goal .sc strong{font:900 italic 4.4cqw/1 var(--game);color:#fff;font-variant-numeric:tabular-nums}
+.gp-stars{display:grid;grid-template-columns:repeat(3,1fr);gap:1.6cqw}
+.gp-stars a{display:grid;justify-items:center;gap:.9cqw;padding:2cqw 1cqw 2.2cqw;border-radius:1.8cqw;background:rgba(10,30,60,.6);text-align:center;min-width:0}
+.gp-stars a.ours{box-shadow:inset 0 0 0 1px rgba(240,138,23,.6)}.gp-stars a.fav{box-shadow:inset 0 0 0 1px var(--ta)}
+.gp-stars i{font:1.7cqw/1 var(--wide);font-style:normal;color:var(--gold);letter-spacing:.12em}
+.gp-stars .nx-hs{width:12cqw;height:12cqw}
+.gp-stars b{font:900 italic 3cqw/1 var(--game);text-transform:uppercase;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gp-stars small{display:flex;align-items:center;gap:.8cqw;font:1.5cqw/1 var(--wide);letter-spacing:.08em;color:var(--mist2);white-space:nowrap}
+
+/* ---------- goalies (in net, in the crease) ---------- */
+.gp-gls{display:grid;grid-template-columns:1fr 1fr;gap:1.6cqw}
+.gp-gls > div{display:grid;gap:1.2cqw;align-content:start;min-width:0}
+.gp-gl{display:grid;grid-template-columns:9cqw minmax(0,1fr);grid-template-rows:auto auto;align-items:center;column-gap:1.6cqw;row-gap:1cqw;padding:1.8cqw;border-radius:1.8cqw;background:rgba(10,30,60,.6);min-width:0}
+.gp-gl .nx-hs{grid-row:1 / 3}
+.gp-gl .who{display:grid;gap:.7cqw;min-width:0}
+.gp-gl .who b{font:900 italic 3.3cqw/1 var(--game);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gp-gl .who small{display:flex;align-items:center;gap:.6cqw;font:1.45cqw/1.2 var(--wide);letter-spacing:.06em;color:var(--mist2);white-space:nowrap;overflow:hidden}
+.gp-gl .n{display:flex;align-items:baseline;gap:1.2cqw}
+.gp-gl .n strong{font:900 italic 4.4cqw/1 var(--game);color:#fff;font-variant-numeric:tabular-nums}
+.gp-gl .n small{font:1.45cqw/1 var(--wide);letter-spacing:.06em;color:var(--gold);white-space:nowrap}
+.gp-gl.sub{opacity:.78}
+.gp-gl.ours{box-shadow:inset 0 0 0 1px rgba(240,138,23,.6)}.gp-gl.fav{box-shadow:inset 0 0 0 1px var(--ta)}
+
+/* ---------- who wins ---------- */
+.gp-pct{display:flex;justify-content:space-between;align-items:flex-end}
+.gp-pct span{display:flex;align-items:baseline;gap:1.6cqw}
+.gp-pct b{font:900 italic 11cqw/.85 var(--game);font-variant-numeric:tabular-nums}
+.gp-pct b i{font-size:5cqw;font-style:italic}
+.gp-pct .a b{color:var(--ca)}.gp-pct .h b{color:var(--ch)}
+.gp-pct small{display:flex;align-items:center;gap:1cqw;font:900 italic 3.6cqw/1 var(--game);color:#fff}
+.gp-split{display:flex;height:4.4cqw;gap:.6cqw;transform:skewX(-14deg);margin:0 1.4cqw}
+.gp-split i{display:block;height:100%;min-width:2cqw;transition:width .6s cubic-bezier(.16,1,.3,1)}
+.gp-split .a{background:linear-gradient(90deg,color-mix(in srgb,var(--ca) 55%,#030a18),var(--ca));box-shadow:0 0 3cqw color-mix(in srgb,var(--ca) 40%,transparent)}
+.gp-split .h{background:linear-gradient(90deg,var(--ch),color-mix(in srgb,var(--ch) 55%,#030a18));box-shadow:0 0 3cqw color-mix(in srgb,var(--ch) 40%,transparent)}
+.gp-whys{display:grid;gap:.4cqw;margin-top:1cqw}
+.gp-why{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:2cqw;padding:1.3cqw 2cqw;border-bottom:1px solid var(--line)}
+.gp-why:last-child{border-bottom:0}
+.gp-why small{font:1.6cqw/1 var(--wide);letter-spacing:.1em;color:var(--mist2);text-align:center;white-space:nowrap}
+.gp-why span{font:900 italic 3.6cqw/1 var(--game);color:var(--mist);font-variant-numeric:tabular-nums}
+.gp-why .h{text-align:right}
+.gp-why.a .a,.gp-why.h .h{color:#fff}
+.gp-why.a .a::after{content:" ◄";font-style:normal;font-size:2.2cqw;color:var(--ca)}
+.gp-why.h .h::before{content:"► ";font-style:normal;font-size:2.2cqw;color:var(--ch)}
+
+/* ---------- form ---------- */
+.gp-fm{display:grid;gap:1.6cqw;padding:2cqw;border-radius:2cqw;background:rgba(4,14,30,.45);border-left:.7cqw solid #3d6fae}
+.gp-fm.ours{border-left-color:var(--ember)}
+.gp-fm.fav{border-left-color:var(--ta)}
+.gp-fm h3{display:flex;align-items:center;gap:1.4cqw;margin:0}
+.gp-fm h3 b{font:900 italic 4.2cqw/1 var(--game);color:#fff}
+.gp-fm.ours h3 b{color:var(--gold)}.gp-fm.fav h3 b{color:var(--ta)}
+.gp-fm h3 span{margin-left:auto;font:1.75cqw/1 var(--wide);letter-spacing:.1em;color:var(--mist2);white-space:nowrap}
+.gp-fm h3 em{font:900 italic 3cqw/1 var(--game);color:#fff;padding:.4cqw 1cqw;border-radius:.6cqw;background:#5b6f8c;letter-spacing:0}
+.gp-fm h3 em.w{background:var(--win)}.gp-fm h3 em.l{background:var(--loss)}
+.gp-pills{display:grid;grid-template-columns:repeat(5,1fr);gap:1.2cqw}
+.gp-pills .fm{gap:.8cqw;padding:1.3cqw .4cqw 1.5cqw}
+.gp-pills .fm em{font-size:2.1cqw}
+.gp-pills .fm b{font-size:3.2cqw}
+.gp-pills .fm small{font-size:1.4cqw}
+.gp-pills .fm:hover{filter:brightness(1.2)}
+
+/* ---------- season series ---------- */
+.gp-srs{display:grid;gap:1.1cqw}
+.gp-sr{display:grid;grid-template-columns:13cqw minmax(0,1fr) 4cqw minmax(0,1fr) 15cqw;align-items:center;gap:1.4cqw;padding:1.6cqw 2.2cqw;border-radius:1.6cqw;background:rgba(10,30,60,.6)}
+.gp-sr small{font:1.6cqw/1.3 var(--wide);letter-spacing:.08em;color:var(--mist2)}
+.gp-sr .t{display:flex;align-items:center;gap:1.2cqw;min-width:0}
+.gp-sr .t:last-of-type{justify-content:flex-end;flex-direction:row-reverse}
+.gp-sr .t b{font:900 italic 3.4cqw/1 var(--game);color:var(--mist)}
+.gp-sr .t strong{font:900 italic 4.4cqw/1 var(--game);color:var(--mist);font-variant-numeric:tabular-nums;margin:0 .6cqw}
+.gp-sr .t.w b,.gp-sr .t.w strong{color:#fff}
+.gp-sr > i{font:900 italic 2.6cqw/1 var(--game);color:#6f8fb6;text-align:center;font-style:italic}
+.gp-sr em{font:1.5cqw/1 var(--wide);font-style:normal;letter-spacing:.08em;color:var(--gold);text-align:right}
+.gp-sr.fut{opacity:.72}
+.gp-sr.here{opacity:1;box-shadow:inset 0 0 0 1.5px var(--gold);background:rgba(255,211,106,.08)}
+
+/* ---------- team leaders ---------- */
+.gp-ld{display:grid;grid-template-columns:minmax(0,1fr) 7cqw minmax(0,1fr);align-items:center;gap:1.2cqw}
+.gp-ld > small{text-align:center;font:1.7cqw/1 var(--wide);letter-spacing:.12em;color:var(--gold)}
+.gp-pc{display:grid;grid-template-columns:9cqw minmax(0,1fr) auto;align-items:center;gap:1.4cqw;padding:1.4cqw 1.8cqw;border-radius:1.8cqw;background:rgba(10,30,60,.6);min-width:0}
+.gp-pc.h{grid-template-columns:auto minmax(0,1fr) 9cqw}
+.gp-pc.h .nx-hs{order:3}.gp-pc.h .who{order:2;text-align:right}.gp-pc.h strong{order:1}
+.gp-pc .who{display:grid;gap:.7cqw;min-width:0}
+.gp-pc .who b{font:900 italic 3.2cqw/1 var(--game);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gp-pc .who small{font:1.4cqw/1 var(--wide);letter-spacing:.06em;color:var(--mist2);white-space:nowrap}
+.gp-pc strong{font:900 italic 5.4cqw/1 var(--game);color:#fff;font-variant-numeric:tabular-nums}
+.gp-pc.a{border-left:.6cqw solid var(--ca)}.gp-pc.h{border-right:.6cqw solid var(--ch)}
+.gp-pc.ours{background:linear-gradient(90deg,rgba(240,138,23,.22),rgba(10,30,60,.6))}
+.gp-pc.fav{box-shadow:inset 0 0 0 1px var(--ta)}
+.gp-pc:hover,.gp-gl:hover,.gp-sr:hover,.gp-goal:hover,.gp-stars a:hover{filter:brightness(1.15)}
