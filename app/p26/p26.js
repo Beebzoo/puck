@@ -109,7 +109,7 @@ function shell(){
   const top = document.getElementById("p26top"), foot = document.getElementById("p26foot");
   top.innerHTML = '<a class="lg" href="#home" aria-label="PUCK 26, back to Play">' + headLogo() + "</a>" +
     '<nav class="p26-tabs" aria-label="Sections"><button class="sh" type="button" data-sh="-1" aria-label="Previous tab">LB</button>' +
-    TABS.map(([t, h]) => '<a href="' + h + '" data-tab="' + t + '">' + t.toUpperCase() + "</a>").join("") +
+    TABS.map(([t, h]) => '<a href="' + h + '" data-tab="' + t + '"' + (t === "t1" ? " hidden" : "") + ">" + t.toUpperCase() + "</a>").join("") +
     '<button class="sh" type="button" data-sh="1" aria-label="Next tab">RB</button><i class="ul" aria-hidden="true"></i></nav>';
   foot.innerHTML = '<div class="p26-ticker" aria-hidden="true"><b>NHL FACTS</b><span>' + FACTS + FACTS + "</span></div>" +
     '<div class="p26-hints"><button type="button" data-hint="a">' + ab("A") + 'SELECT</button><button type="button" data-hint="b">' + ab("B") + 'BACK</button><button type="button" data-hint="y">' + ab("Y") + "POOL</button></div>";
@@ -134,7 +134,7 @@ function route(name){
   const tab = TAB_OF[name];
   document.body.classList.toggle("p26-tab", !!tab);
   document.body.classList.toggle("p26-game", !tab);
-  document.querySelectorAll(".p26-tabs [data-tab]").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
+  document.querySelectorAll(".p26-tabs [data-tab]").forEach(a => { a.classList.toggle("on", a.dataset.tab === tab); if(a.dataset.tab === "t1") a.hidden = tab !== "t1"; });
   underline(!!TAB_OF[prev]);
   closeLoad(true);
 }
@@ -243,7 +243,9 @@ function watch(){
 }
 function shiftTab(d){
   const i = Math.max(0, TABS.findIndex(([t]) => t === (TAB_OF[cur] || "play")));
-  location.hash = TABS[(i + d + TABS.length) % TABS.length][1];
+  let j = (i + d + TABS.length) % TABS.length;
+  if(TABS[j][0] === "t1" && d < 0) j = (j - 1 + TABS.length) % TABS.length; /* T1 hides: only RB past ME reaches it */
+  location.hash = TABS[j][1];
 }
 
 /* ---------- countdowns: anything with data-until ticks every second ---------- */
