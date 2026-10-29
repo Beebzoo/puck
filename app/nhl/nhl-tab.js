@@ -1,6 +1,7 @@
 /* The NHL tab: PUCK's stats centre (decided in _plans/nhl-tab.md).
    Routes (app.js sends every #nhl… hash here as render(app, arg)):
      #nhl                        overview: your team, tonight, divisions, leaders, goalies, all 32 clubs
+     #nhl-games[-YYYY-MM-DD]     the schedule: a week of games from that day, filter all / Pool / your team
      #nhl-standings[-<view>]     division | conference | wildcard | league, sortable columns, the power map
      #nhl-leaders-<cat>          skaters; #nhl-leaders-goalie-<cat>, -rookie-<cat>, -d-<cat> (defencemen)
      #nhl-clubs                  every club by division
@@ -63,6 +64,7 @@ const SK_CATS = "points,goals,assists,plusMinus,goalsPp,goalsSh,penaltyMins,face
 const PATHS = {
   standings: "/v1/standings/now",
   score: "/v1/score/now",
+  scoreOn: d => "/v1/score/" + d,
   skaters: () => N().q("/v1/skater-stats-leaders/current", { categories: SK_CATS, limit: 20 }),
   skatersBasic: () => N().q("/v1/skater-stats-leaders/current", { categories: "points,goals,assists", limit: 20 }),
   skater1: (cat, limit) => N().q("/v1/skater-stats-leaders/current", { categories: cat, limit }),
@@ -164,7 +166,7 @@ function wireTables(root, onSort){
 function swapHash(h){ try { history.replaceState(null, "", h); } catch(e){ location.hash = h; } }
 
 /* ---------------- the frame: sub-navigation, back, the page ---------------- */
-const NAV = [["overview", "#nhl", "Overview"], ["standings", "#nhl-standings", "Standings"], ["leaders", "#nhl-leaders-points", "Leaders"], ["clubs", "#nhl-clubs", "Clubs"]];
+const NAV = [["overview", "#nhl", "Overview"], ["games", "#nhl-games", "Games"], ["standings","#nhl-standings", "Standings"], ["leaders", "#nhl-leaders-points", "Leaders"], ["clubs", "#nhl-clubs", "Clubs"]];
 let trail = [], gen = 0;
 function frame(app, section, deep){
   const h = location.hash || "#nhl";
@@ -251,8 +253,12 @@ async function tonight(page, alive){
     const g = (r.data.games || []), d = r.data.currentDate ? ymd(r.data.currentDate) : new Date();
     const lv = g.filter(x => x.gameState === "LIVE" || x.gameState === "CRIT").length;
     const sub = '<span class="nx-sub">' + day(d) + " · " + g.length + " GAME" + (g.length === 1 ? "" : "S") + (lv ? ' · <b class="lv">' + lv + " LIVE</b>" : "") + "</span>";
+    /* the next days from the feed's own week (no extra request), each a way into the schedule */
+    const cur = r.data.currentDate, next = (r.data.gameWeek || []).filter(w => cur && w.date > cur && w.numberOfGames).slice(0, 4);
+    const up = '<div class="nx-h nx-uph"><h2>Coming up</h2>' + more("#nhl-games", "ALL GAMES") + "</div>" +
+      (next.length ? '<div class="nx-up">' + next.map(w => '<a href="#nhl-games-' + w.date + '"><small>' + esc(day(ymd(w.date)).split(" ")[0]) + "</small><b>" + esc(dm(ymd(w.date))) + "</b><em>" + w.numberOfGames + " GAME" + (w.numberOfGames === 1 ? "" : "S") + "</em></a>").join("") + "</div>" : "");
     box().innerHTML = lbl(lv ? "Live now" : "Tonight", sub) + (g.length ? '<div class="nx-games">' + g.map(gameTile).join("") + "</div>" : '<p class="nx-none">No NHL games today.</p>') +
-      (g.length ? '<p class="nx-fine">Times in your time zone. Tap a game for the head to head.</p>' : "");
+      (g.length ? '<p class="nx-fine">Times in your time zone. Tap a game for the head to head.</p>' : "") + up;
     return g;
   };
   try {
@@ -263,6 +269,46 @@ async function tonight(page, alive){
       onLeave(() => clearInterval(iv));
     }
   } catch(e){ if(alive()) box().innerHTML = lbl("Tonight") + fail("tonight's games", e); }
+}
+
+/* ================= GAMES: a week of the schedule ================= */
+/* dates are the NHL's own (Eastern) days, as YYYY-MM-DD; the arithmetic runs at UTC noon so no zone moves a day */
+const addDays = (s, n) => new Date(Date.parse(s + "T12:00:00Z") + n*864e5).toISOString().slice(0, 10);
+let gamesFilter = "all";
+async function gamesPage(page, alive, arg){
+  const today = await load(PATHS.score, TTL.live).then(r => r.data.currentDate).catch(() => null) || new Date().toISOString().slice(0, 10);
+  if(!alive()) return;
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(arg) ? arg : today;
+  const days = [...Array(7)].map((_, i) => addDays(from, i));
+  const filters = [["all", "All games"], ["pool", "Pool"]].concat(FAV && !POOL.includes(FAV) ? [["fav", "★ " + FAV]] : []);
+  if(!filters.some(f => f[0] === gamesFilter)) gamesFilter = "all";
+  const keep = x => gamesFilter === "all" ? true : gamesFilter === "pool" ? [x.awayTeam.abbrev, x.homeTeam.abbrev].some(t => POOL.includes(t)) : [x.awayTeam.abbrev, x.homeTeam.abbrev].includes(FAV);
+  page.innerHTML = '<div class="nx-h"><h2>Games</h2><span class="nx-sub">' + esc(dm(ymd(days[0]))) + " – " + esc(dm(ymd(days[6]))) + "</span></div>" +
+    '<div class="nx-wk"><a href="#nhl-games-' + addDays(from, -7) + '">◄ EARLIER</a>' + (from !== today ? '<a href="#nhl-games">TONIGHT</a>' : "") + '<a href="#nhl-games-' + addDays(from, 7) + '">LATER ►</a></div>' +
+    '<div class="nx-chips" role="tablist">' + filters.map(([k, t]) => '<a role="tab" href="#" data-f="' + k + '"' + (k === gamesFilter ? ' class="on" aria-selected="true"' : ' aria-selected="false"') + ">" + esc(t) + "</a>").join("") + "</div>" +
+    days.map(d => '<section class="nx-day" data-d="' + d + '">' + lbl(title(d)) + sk("19cqw") + "</section>").join("") +
+    '<p class="nx-fine">Times in your time zone. Tap a game for the head to head.</p>';
+  function title(d){ return d === today ? "Tonight" : d === addDays(today, 1) ? "Tomorrow" : esc(day(ymd(d))); }
+  const got = {};
+  const draw = d => {
+    const sec = $('.nx-day[data-d="' + d + '"]', page), g = got[d];
+    if(!sec || !g) return;
+    const show = g.filter(keep);
+    const n = '<span class="nx-sub">' + g.length + " GAME" + (g.length === 1 ? "" : "S") + (show.length !== g.length ? " · " + show.length + " SHOWN" : "") + "</span>";
+    sec.innerHTML = lbl(title(d), n) + (show.length ? '<div class="nx-games">' + show.map(gameTile).join("") + "</div>" : '<p class="nx-none">' + (g.length ? "None of these games." : "No NHL games.") + "</p>");
+    sec.hidden = gamesFilter !== "all" && !show.length;
+  };
+  $$("[data-f]", page).forEach(a => a.addEventListener("click", e => {
+    e.preventDefault(); gamesFilter = a.dataset.f;
+    $$("[data-f]", page).forEach(b => { b.classList.toggle("on", b === a); b.setAttribute("aria-selected", b === a); });
+    days.forEach(draw);
+  }));
+  /* the days load side by side; a day that fails says so in its own place */
+  await Promise.all(days.map(async d => {
+    try { const r = await load(PATHS.scoreOn(d), d === today ? TTL.live : TTL.std); if(!alive()) return; got[d] = r.data.games || []; draw(d); }
+    catch(e){ if(!alive()) return; const sec = $('.nx-day[data-d="' + d + '"]', page); if(sec) sec.innerHTML = $(".nx-h", sec).outerHTML + fail("these games", e); }
+  }));
+  if(alive()) stamp(page);
 }
 
 /* the four divisions, top four and the playoff line under third; your division first */
@@ -649,7 +695,7 @@ function logTable(log, goalie){
 async function render(app, arg){
   const my = ++gen; stamps = [];
   const parts = String(arg || "").split("-"), kind = parts[0] || "", rest = parts.slice(1).join("-");
-  const section = kind === "standings" ? "standings" : kind === "leaders" ? "leaders" : kind === "clubs" ? "clubs" : kind === "" ? "overview" : null;
+  const section = kind === "standings" ? "standings" : kind === "leaders" ? "leaders" : kind === "clubs" ? "clubs" : kind === "games" ? "games" : kind === "" ? "overview" : null;
   const page = frame(app, section, kind === "team" || kind === "player" || kind === "game");
   const alive = () => my === gen && document.body.contains(page);
   FAV = await favTeam();
@@ -657,6 +703,7 @@ async function render(app, arg){
   if(kind === "standings") return standingsPage(page, alive, rest);
   if(kind === "leaders") return leadersPage(page, alive, rest);
   if(kind === "clubs") return clubsPage(page, alive);
+  if(kind === "games") return gamesPage(page, alive, rest);
   if(kind === "team") return teamPage(page, alive, rest);
   if(kind === "player") return playerPage(page, alive, rest);
   if(kind === "game" && P.nhlGame) return P.nhlGame.page(page, alive, rest, KIT);
